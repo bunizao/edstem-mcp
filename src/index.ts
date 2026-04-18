@@ -1,14 +1,42 @@
+import express from "express";
+
+import { getOAuthProtectedResourceMetadataUrl, mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
+import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 
 import { loadConfig } from "./config.js";
 import { createServer, mapToolError } from "./mcp/server.js";
+import { EdstemOAuthProvider } from "./oauth/provider.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
   const app = createMcpExpressApp();
+  const authProvider = config.oauth.enabled ? new EdstemOAuthProvider(config.oauth) : null;
 
-  app.all(config.mcpPath, async (request, response) => {
+  app.use(express.json({ limit: "1mb" }));
+
+  if (authProvider) {
+    app.use(
+      mcpAuthRouter({
+        issuerUrl: config.oauth.issuerUrl,
+        provider: authProvider,
+        resourceName: "EdStem MCP",
+        resourceServerUrl: config.oauth.mcpServerUrl,
+        scopesSupported: [config.oauth.scope]
+      })
+    );
+  }
+
+  const authMiddleware = authProvider
+    ? requireBearerAuth({
+        requiredScopes: [config.oauth.scope],
+        resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(config.oauth.mcpServerUrl),
+        verifier: authProvider
+      })
+    : null;
+
+  app.all(config.mcpPath, ...(authMiddleware ? [authMiddleware] : []), async (request, response) => {
     const server = createServer(config);
     const transport = new StreamableHTTPServerTransport({
       enableJsonResponse: true,
