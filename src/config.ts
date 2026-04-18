@@ -1,5 +1,7 @@
 const DEFAULT_API_BASE_URL = "https://edstem.org/api/";
-const DEFAULT_OAUTH_STORE_PATH = ".data/oauth-store.json";
+const DEFAULT_DATABASE_PATH = ".data/edstem-mcp.db";
+const DEFAULT_READ_SCOPE = "mcp:tools.read";
+const DEFAULT_WRITE_SCOPE = "mcp:tools.write";
 
 function normalizeApiBaseUrl(value: string | undefined): string {
   const trimmed = value?.trim();
@@ -26,7 +28,7 @@ function parsePositiveInt(value: string | undefined, fallback: number): number {
 }
 
 function parseBoolean(value: string | undefined, fallback: boolean): boolean {
-  if (value == null || value.trim() === "") {
+  if (!value) {
     return fallback;
   }
   const normalized = value.trim().toLowerCase();
@@ -48,15 +50,27 @@ function normalizePath(value: string | undefined, fallback: string): string {
 }
 
 function parseUrl(value: string | undefined, fallback: string): URL {
-  const candidate = value?.trim() || fallback;
-  return new URL(candidate);
+  return new URL(value?.trim() || fallback);
 }
 
-export interface OAuthUserConfig {
-  displayName: string;
-  id: string;
-  password: string;
-  username: string;
+function parseMasterKey(name: string, value: string | undefined): Buffer | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  let buffer: Buffer;
+  try {
+    buffer = Buffer.from(trimmed, "base64");
+  } catch {
+    throw new Error(`${name} must be a valid base64 string`);
+  }
+
+  if (buffer.length !== 32) {
+    throw new Error(`${name} must decode to exactly 32 bytes`);
+  }
+
+  return buffer;
 }
 
 export interface OAuthConfig {
@@ -64,60 +78,73 @@ export interface OAuthConfig {
   enabled: boolean;
   issuerUrl: URL;
   mcpServerUrl: URL;
+  readScope: string;
   refreshTokenTtlSeconds: number;
-  scope: string;
   sessionCookieName: string;
   sessionSecret: string;
   sessionTtlSeconds: number;
-  storePath: string;
-  user: OAuthUserConfig;
+  supportedScopes: string[];
+  writeScope: string;
 }
 
 export interface AppConfig {
   apiBaseUrl: string;
-  edApiToken: string;
+  databasePath: string;
+  devEdApiToken?: string;
+  logLevel: "debug" | "info" | "warn" | "error";
+  masterKey: Buffer;
+  masterKeyPrevious?: Buffer;
   mcpPath: string;
   oauth: OAuthConfig;
   port: number;
+  publicBaseUrl: URL;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
-  const edApiToken = env.ED_API_TOKEN?.trim();
-  if (!edApiToken) {
-    throw new Error("ED_API_TOKEN is required");
-  }
-
   const port = parsePort(env.PORT);
   const mcpPath = normalizePath(env.MCP_PATH, "/mcp");
-  const oauthEnabled = parseBoolean(env.OAUTH_ENABLED, true);
   const publicBaseUrl = parseUrl(env.PUBLIC_BASE_URL, `http://localhost:${port}`);
-  const issuerUrl = parseUrl(env.OAUTH_ISSUER_URL, publicBaseUrl.href);
-  const sessionSecret = env.OAUTH_SESSION_SECRET?.trim() || "dev-session-secret-change-me";
-  const username = env.OAUTH_USERNAME?.trim() || "admin";
-  const password = env.OAUTH_PASSWORD?.trim() || "dev-password-change-me";
+  const masterKey = parseMasterKey("MASTER_KEY", env.MASTER_KEY);
+
+  if (!masterKey) {
+    throw new Error("MASTER_KEY is required");
+  }
+
+  const readScope = env.OAUTH_READ_SCOPE?.trim() || DEFAULT_READ_SCOPE;
+  const writeScope = env.OAUTH_WRITE_SCOPE?.trim() || DEFAULT_WRITE_SCOPE;
+  const sessionSecret =
+    env.OAUTH_SESSION_SECRET?.trim() || masterKey.toString("base64url");
 
   return {
     apiBaseUrl: normalizeApiBaseUrl(env.ED_API_BASE_URL),
-    edApiToken,
+    databasePath: env.DATABASE_PATH?.trim() || DEFAULT_DATABASE_PATH,
+    devEdApiToken: env.ED_API_TOKEN?.trim() || undefined,
+    logLevel:
+      (env.LOG_LEVEL?.trim().toLowerCase() as AppConfig["logLevel"] | undefined) ||
+      "info",
+    masterKey,
+    masterKeyPrevious: parseMasterKey("MASTER_KEY_PREVIOUS", env.MASTER_KEY_PREVIOUS),
     mcpPath,
     oauth: {
-      accessTokenTtlSeconds: parsePositiveInt(env.OAUTH_ACCESS_TOKEN_TTL_SECONDS, 3600),
-      enabled: oauthEnabled,
-      issuerUrl,
+      accessTokenTtlSeconds: parsePositiveInt(
+        env.OAUTH_ACCESS_TOKEN_TTL_SECONDS,
+        3600
+      ),
+      enabled: parseBoolean(env.OAUTH_ENABLED, true),
+      issuerUrl: parseUrl(env.OAUTH_ISSUER_URL, publicBaseUrl.href),
       mcpServerUrl: new URL(mcpPath, publicBaseUrl),
-      refreshTokenTtlSeconds: parsePositiveInt(env.OAUTH_REFRESH_TOKEN_TTL_SECONDS, 2592000),
-      scope: "mcp:tools",
+      readScope,
+      refreshTokenTtlSeconds: parsePositiveInt(
+        env.OAUTH_REFRESH_TOKEN_TTL_SECONDS,
+        2592000
+      ),
       sessionCookieName: env.OAUTH_SESSION_COOKIE_NAME?.trim() || "edstem_mcp_session",
       sessionSecret,
       sessionTtlSeconds: parsePositiveInt(env.OAUTH_SESSION_TTL_SECONDS, 604800),
-      storePath: env.OAUTH_STORE_PATH?.trim() || DEFAULT_OAUTH_STORE_PATH,
-      user: {
-        displayName: env.OAUTH_USER_DISPLAY_NAME?.trim() || "EdStem MCP User",
-        id: env.OAUTH_USER_ID?.trim() || username,
-        password,
-        username
-      }
+      supportedScopes: [readScope, writeScope],
+      writeScope
     },
-    port
+    port,
+    publicBaseUrl
   };
 }

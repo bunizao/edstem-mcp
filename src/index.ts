@@ -1,80 +1,31 @@
-import express from "express";
-
-import { getOAuthProtectedResourceMetadataUrl, mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
-import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
-import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-
 import { loadConfig } from "./config.js";
-import { createServer, mapToolError } from "./mcp/server.js";
-import { EdstemOAuthProvider } from "./oauth/provider.js";
+import { createApp } from "./app.js";
+import { createRuntime } from "./runtime.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
-  const app = createMcpExpressApp();
-  const authProvider = config.oauth.enabled ? new EdstemOAuthProvider(config.oauth) : null;
+  const runtime = createRuntime(config);
+  const app = createApp(runtime);
+  const server = app.listen(config.port, () => {
+    runtime.logger.info({
+      mcpPath: config.mcpPath,
+      port: config.port
+    }, "edstem-mcp listening");
+  });
 
-  app.use(express.json({ limit: "1mb" }));
-
-  if (authProvider) {
-    app.use(
-      mcpAuthRouter({
-        issuerUrl: config.oauth.issuerUrl,
-        provider: authProvider,
-        resourceName: "EdStem MCP",
-        resourceServerUrl: config.oauth.mcpServerUrl,
-        scopesSupported: [config.oauth.scope]
-      })
-    );
-  }
-
-  const authMiddleware = authProvider
-    ? requireBearerAuth({
-        requiredScopes: [config.oauth.scope],
-        resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(config.oauth.mcpServerUrl),
-        verifier: authProvider
-      })
-    : null;
-
-  app.all(config.mcpPath, ...(authMiddleware ? [authMiddleware] : []), async (request, response) => {
-    const server = createServer(config);
-    const transport = new StreamableHTTPServerTransport({
-      enableJsonResponse: true,
-      sessionIdGenerator: undefined
-    });
-
-    try {
-      await server.connect(transport);
-      await transport.handleRequest(request, response, request.body);
-      response.on("close", () => {
-        void transport.close();
-        void server.close();
-      });
-    } catch (error) {
-      const mapped = mapToolError(error);
-      if (!response.headersSent) {
-        response.status(500).json({
-          jsonrpc: "2.0",
-          error: {
-            code: -32000,
-            message: mapped.message
-          },
-          id: null
-        });
+  const shutdown = (signal: string) => {
+    runtime.logger.info({ signal }, "shutting down");
+    server.close((error) => {
+      if (error) {
+        runtime.logger.error({ error }, "failed to close server cleanly");
+        process.exitCode = 1;
       }
-    }
-  });
-
-  app.get("/health", (_request, response) => {
-    response.json({
-      ok: true,
-      service: "edstem-mcp"
+      runtime.close();
     });
-  });
+  };
 
-  app.listen(config.port, () => {
-    console.log(`edstem-mcp listening on http://localhost:${config.port}${config.mcpPath}`);
-  });
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
 }
 
 main().catch((error) => {

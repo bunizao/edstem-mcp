@@ -1,33 +1,13 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-import type { OAuthConfig, OAuthUserConfig } from "../config.js";
+import type { OAuthConfig } from "../config.js";
+import type { UserRecord } from "../users/repository.js";
 
 export interface SessionPayload {
   displayName: string;
+  email: string;
   expiresAt: number;
-  userId: string;
-  username: string;
-}
-
-export function buildSessionCookie(
-  session: SessionPayload,
-  config: OAuthConfig,
-  now: Date = new Date()
-): string {
-  const payload = encodePayload(session, config.sessionSecret);
-  const secure = config.issuerUrl.protocol === "https:";
-  const maxAge = Math.max(0, Math.floor((session.expiresAt - now.getTime()) / 1000));
-  const parts = [
-    `${config.sessionCookieName}=${encodeURIComponent(payload)}`,
-    "HttpOnly",
-    "Path=/",
-    "SameSite=Lax",
-    `Max-Age=${maxAge}`
-  ];
-  if (secure) {
-    parts.push("Secure");
-  }
-  return parts.join("; ");
+  userId: number;
 }
 
 export function buildExpiredSessionCookie(config: OAuthConfig): string {
@@ -45,16 +25,36 @@ export function buildExpiredSessionCookie(config: OAuthConfig): string {
   return parts.join("; ");
 }
 
+export function buildSessionCookie(
+  session: SessionPayload,
+  config: OAuthConfig,
+  now: Date = new Date()
+): string {
+  const payload = encodePayload(session, config.sessionSecret);
+  const maxAge = Math.max(0, Math.floor((session.expiresAt - now.getTime()) / 1000));
+  const parts = [
+    `${config.sessionCookieName}=${encodeURIComponent(payload)}`,
+    "HttpOnly",
+    "Path=/",
+    "SameSite=Lax",
+    `Max-Age=${maxAge}`
+  ];
+  if (config.issuerUrl.protocol === "https:") {
+    parts.push("Secure");
+  }
+  return parts.join("; ");
+}
+
 export function createSessionForUser(
-  user: OAuthUserConfig,
+  user: UserRecord,
   sessionTtlSeconds: number,
   now: Date = new Date()
 ): SessionPayload {
   return {
-    displayName: user.displayName,
+    displayName: user.displayName || user.email,
+    email: user.email,
     expiresAt: now.getTime() + sessionTtlSeconds * 1000,
-    userId: user.id,
-    username: user.username
+    userId: user.id
   };
 }
 
@@ -63,19 +63,16 @@ export function readSessionFromCookieHeader(
   config: OAuthConfig,
   now: Date = new Date()
 ): SessionPayload | null {
-  const cookies = parseCookies(cookieHeader);
-  const raw = cookies.get(config.sessionCookieName);
+  const raw = parseCookies(cookieHeader).get(config.sessionCookieName);
   if (!raw) {
     return null;
   }
 
   const payload = decodePayload(raw, config.sessionSecret);
-  if (!payload) {
+  if (!payload || payload.expiresAt <= now.getTime()) {
     return null;
   }
-  if (payload.expiresAt <= now.getTime()) {
-    return null;
-  }
+
   return payload;
 }
 
@@ -90,14 +87,18 @@ function parseCookies(cookieHeader: string | undefined): Map<string, string> {
     if (!trimmed) {
       continue;
     }
+
     const separator = trimmed.indexOf("=");
     if (separator <= 0) {
       continue;
     }
-    const key = trimmed.slice(0, separator);
-    const value = trimmed.slice(separator + 1);
-    cookies.set(key, decodeURIComponent(value));
+
+    cookies.set(
+      trimmed.slice(0, separator),
+      decodeURIComponent(trimmed.slice(separator + 1))
+    );
   }
+
   return cookies;
 }
 
@@ -120,21 +121,23 @@ function decodePayload(raw: string, secret: string): SessionPayload | null {
   }
 
   try {
-    const json = Buffer.from(encoded, "base64url").toString("utf-8");
-    const parsed = JSON.parse(json) as Partial<SessionPayload>;
+    const parsed = JSON.parse(
+      Buffer.from(encoded, "base64url").toString("utf-8")
+    ) as Partial<SessionPayload>;
     if (
       typeof parsed.displayName !== "string" ||
+      typeof parsed.email !== "string" ||
       typeof parsed.expiresAt !== "number" ||
-      typeof parsed.userId !== "string" ||
-      typeof parsed.username !== "string"
+      typeof parsed.userId !== "number"
     ) {
       return null;
     }
+
     return {
       displayName: parsed.displayName,
+      email: parsed.email,
       expiresAt: parsed.expiresAt,
-      userId: parsed.userId,
-      username: parsed.username
+      userId: parsed.userId
     };
   } catch {
     return null;
@@ -146,14 +149,11 @@ function sign(value: string, secret: string): string {
 }
 
 function verify(value: string, signature: string, secret: string): boolean {
-  try {
-    const expected = Buffer.from(sign(value, secret), "utf-8");
-    const actual = Buffer.from(signature, "utf-8");
-    if (expected.length !== actual.length) {
-      return false;
-    }
-    return timingSafeEqual(expected, actual);
-  } catch {
+  const expected = Buffer.from(sign(value, secret), "utf-8");
+  const actual = Buffer.from(signature, "utf-8");
+  if (expected.length !== actual.length) {
     return false;
   }
+
+  return timingSafeEqual(expected, actual);
 }

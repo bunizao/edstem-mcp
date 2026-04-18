@@ -1,0 +1,7 @@
+dist
+node_modules
+.data
+coverage
+.git
+.DS_Store
+test

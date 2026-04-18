@@ -1,20 +1,8 @@
 # edstem-mcp
 
-A TypeScript remote MCP server that exposes read-only Ed Discussion tools.
+Remote MCP server for Ed Discussion with per-user OAuth, encrypted Ed tokens, and read/write tools.
 
-## Features
-
-- Current user profile
-- Enrolled courses
-- Course lessons
-- Lesson detail with slides
-- Quiz slide questions
-- Saved quiz slide responses
-- Course threads
-- Thread detail
-- User activity
-
-## Exposed MCP Tools
+## Tools
 
 - `get_user`
 - `list_courses`
@@ -26,37 +14,43 @@ A TypeScript remote MCP server that exposes read-only Ed Discussion tools.
 - `get_thread`
 - `get_course_thread`
 - `list_activity`
+- `submit_slide_answer`
+- `submit_slide`
 
-## Status
-
-This first cut uses a single server-level `ED_API_TOKEN`. That is enough to build and test the MCP tools, but it is not the final public multi-user auth model for `claude.ai`.
-
-The next auth milestone is user-bound credentials via MCP auth plus a separate Ed token connection flow.
-
-## Requirements
-
-- Node.js 20+
-- An Ed API token from <https://edstem.org/settings/api-tokens>
-
-## Development
+## Setup
 
 ```bash
 npm install
-export ED_API_TOKEN="your-ed-token"
+export MASTER_KEY="$(openssl rand -base64 32)"
 npm run dev
 ```
 
-The server listens on `http://localhost:8787/mcp`.
-
 ## Environment
 
-- `ED_API_TOKEN`: Required for the current single-user development mode
-- `ED_API_BASE_URL`: Optional. Defaults to `https://edstem.org/api/`
-- `PORT`: Optional. Defaults to `8787`
-- `MCP_PATH`: Optional. Defaults to `/mcp`
+- `MASTER_KEY`: required, 32-byte base64 key for Ed token encryption
+- `DATABASE_PATH`: optional, defaults to `.data/edstem-mcp.db`
+- `PUBLIC_BASE_URL`: optional, defaults to `http://localhost:${PORT}`
+- `PORT`: optional, defaults to `8787`
+- `MCP_PATH`: optional, defaults to `/mcp`
+- `ED_API_BASE_URL`: optional, defaults to `https://edstem.org/api/`
+- `ED_API_TOKEN`: optional dev fallback
+- `OAUTH_ACCESS_TOKEN_TTL_SECONDS`: optional, defaults to `3600`
+- `OAUTH_REFRESH_TOKEN_TTL_SECONDS`: optional, defaults to `2592000`
 
-## Next Steps
+## Scripts
 
-- Replace the single server token with user-bound credentials
-- Add MCP auth for Claude remote connector usage
-- Add an Ed token connection flow and encrypted credential storage
+- `npm run dev`
+- `npm run build`
+- `npm run check`
+- `npm test`
+- `npm run admin -- reset-password <email> [new-password]`
+
+## Docker
+
+```bash
+MASTER_KEY="$(openssl rand -base64 32)" DOMAIN=your.host docker compose up -d --build
+```
+
+## Backup
+
+Copy the SQLite file at `DATABASE_PATH`. For a clean snapshot, stop the app and copy the file, or use `sqlite3 .backup` against the database.
