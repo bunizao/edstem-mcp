@@ -19,10 +19,10 @@ export function renderAuthorizePage(
   options: RenderAuthorizePageOptions
 ): string {
   const clientName = client.client_name || client.client_id;
-  const primaryAction = options.showEdToken ? "Continue" : "Continue with current session";
+  const actionLabel = options.showEdToken ? "Authorize Ed Access" : "Authorize Access";
   const tokenPlaceholder = options.showEdToken
-    ? "Paste your Ed API token"
-    : "Leave blank to reuse this browser session";
+    ? "Paste your Ed API token…"
+    : "Leave blank to reuse this session…";
 
   return `<!doctype html>
 <html lang="en">
@@ -32,206 +32,162 @@ export function renderAuthorizePage(
     <title>Authorize ${escapeHtml(clientName)}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
       :root {
         color-scheme: light;
-        --background: #f6f3ee;
-        --surface: rgba(255, 255, 255, 0.84);
-        --surface-strong: #ffffff;
-        --panel: #171717;
-        --panel-muted: rgba(255, 255, 255, 0.72);
-        --text: #171717;
-        --muted: #66615a;
-        --border: rgba(23, 23, 23, 0.1);
-        --border-strong: rgba(255, 255, 255, 0.12);
-        --accent: #1f6b57;
-        --accent-hover: #184f42;
-        --danger: #a13f35;
-        --shadow: 0 30px 80px rgba(17, 17, 17, 0.12);
-        --radius-xl: 28px;
-        --radius-lg: 18px;
-        --radius-md: 14px;
+        --background: #fafafa;
+        --foreground: #0f0f10;
+        --card: #ffffff;
+        --muted: #6b6b73;
+        --muted-background: #f4f4f5;
+        --border: #e4e4e7;
+        --input: #e4e4e7;
+        --ring: rgba(15, 15, 16, 0.12);
+        --primary: #18181b;
+        --primary-hover: #09090b;
+        --primary-foreground: #fafafa;
+        --destructive: #b42318;
+        --destructive-background: #fef3f2;
+        --radius: 0.875rem;
+        --shadow: 0 1px 2px rgba(15, 15, 16, 0.04), 0 12px 32px rgba(15, 15, 16, 0.06);
       }
       * {
         box-sizing: border-box;
+        -webkit-tap-highlight-color: rgba(15, 15, 16, 0.08);
+      }
+      html {
+        background: var(--background);
       }
       body {
         margin: 0;
         min-height: 100vh;
-        background:
-          radial-gradient(circle at top left, rgba(31, 107, 87, 0.14), transparent 30%),
-          radial-gradient(circle at bottom right, rgba(23, 23, 23, 0.08), transparent 34%),
-          linear-gradient(180deg, #fbf9f5 0%, var(--background) 100%);
-        color: var(--text);
+        background: var(--background);
+        color: var(--foreground);
         font-family: "IBM Plex Sans", sans-serif;
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
       }
-      body::before {
-        content: "";
-        position: fixed;
-        inset: 0;
-        pointer-events: none;
-        background-image:
-          linear-gradient(rgba(255, 255, 255, 0.12) 1px, transparent 1px),
-          linear-gradient(90deg, rgba(255, 255, 255, 0.12) 1px, transparent 1px);
-        background-size: 32px 32px;
-        mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.2), transparent 75%);
-      }
-      .shell {
+      main {
         min-height: 100vh;
         display: flex;
         align-items: center;
         justify-content: center;
-        padding: 2rem;
+        padding: 1.5rem;
       }
-      .auth-card {
-        width: min(100%, 72rem);
-        display: grid;
-        grid-template-columns: minmax(18rem, 1fr) minmax(22rem, 30rem);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-xl);
-        overflow: hidden;
-        background: color-mix(in srgb, var(--surface) 88%, white);
-        box-shadow: var(--shadow);
-        backdrop-filter: blur(24px);
-        animation: fade-up 260ms ease-out both;
-      }
-      .intro {
-        position: relative;
-        padding: 2.5rem;
-        background:
-          radial-gradient(circle at top left, rgba(255, 255, 255, 0.12), transparent 30%),
-          linear-gradient(160deg, #111111 0%, #1c1c1c 52%, #12372e 100%);
-        color: white;
-      }
-      .intro::after {
-        content: "";
+      .skip-link {
         position: absolute;
-        inset: auto 2.5rem 2rem 2.5rem;
-        height: 1px;
-        background: linear-gradient(90deg, rgba(255, 255, 255, 0.22), transparent);
+        top: 0.75rem;
+        left: 0.75rem;
+        transform: translateY(-160%);
+        border-radius: calc(var(--radius) - 0.125rem);
+        background: var(--foreground);
+        color: var(--primary-foreground);
+        padding: 0.625rem 0.875rem;
+        text-decoration: none;
+        transition: transform 160ms ease;
       }
-      .badge {
+      .skip-link:focus-visible {
+        transform: translateY(0);
+      }
+      .card {
+        width: min(100%, 29rem);
+        border: 1px solid var(--border);
+        border-radius: calc(var(--radius) + 0.125rem);
+        background: var(--card);
+        box-shadow: var(--shadow);
+      }
+      .card-header,
+      .card-content,
+      .card-footer {
+        padding-inline: 1.5rem;
+      }
+      .card-header {
+        padding-top: 1.5rem;
+        padding-bottom: 1rem;
+      }
+      .card-content {
+        padding-bottom: 1.25rem;
+      }
+      .card-footer {
+        padding-top: 0;
+        padding-bottom: 1.5rem;
+      }
+      .eyebrow {
         display: inline-flex;
         align-items: center;
-        gap: 0.45rem;
-        min-height: 2rem;
-        padding: 0.3rem 0.75rem;
-        border: 1px solid rgba(255, 255, 255, 0.18);
+        min-height: 1.75rem;
         border-radius: 999px;
-        background: rgba(255, 255, 255, 0.08);
-        font-size: 0.82rem;
-        font-weight: 600;
-        letter-spacing: 0.02em;
-      }
-      .intro h1,
-      .panel h2 {
-        margin: 0;
-        font-family: "Instrument Serif", serif;
-        font-weight: 400;
-        letter-spacing: -0.03em;
-      }
-      .intro h1 {
-        margin-top: 1.5rem;
-        font-size: clamp(2.5rem, 5vw, 4.2rem);
-        line-height: 0.95;
-        max-width: 10ch;
-      }
-      .intro p {
-        margin: 1rem 0 0;
-        max-width: 32rem;
-        color: var(--panel-muted);
-        font-size: 1rem;
-        line-height: 1.65;
-      }
-      .feature-list {
-        margin: 2rem 0 0;
-        padding: 0;
-        list-style: none;
-        display: grid;
-        gap: 1rem;
-      }
-      .feature-list li {
-        display: grid;
-        gap: 0.3rem;
-        padding: 0.95rem 1rem;
-        border: 1px solid var(--border-strong);
-        border-radius: var(--radius-md);
-        background: rgba(255, 255, 255, 0.06);
-      }
-      .feature-list strong {
-        font-size: 0.95rem;
-      }
-      .feature-list span {
-        color: rgba(255, 255, 255, 0.72);
-        font-size: 0.9rem;
-        line-height: 1.55;
-      }
-      .meta {
-        margin-top: 2rem;
-        display: grid;
-        gap: 0.75rem;
-        color: rgba(255, 255, 255, 0.72);
-        font-size: 0.88rem;
-      }
-      .meta code {
-        display: inline-block;
-        max-width: 100%;
-        overflow-wrap: anywhere;
-        color: white;
-        font-family: "IBM Plex Sans", sans-serif;
-        font-size: 0.88rem;
-      }
-      .panel {
-        padding: 2.25rem;
-        background: color-mix(in srgb, var(--surface-strong) 96%, white);
-      }
-      .panel-header {
-        display: grid;
-        gap: 0.65rem;
-      }
-      .panel-header p {
-        margin: 0;
+        border: 1px solid var(--border);
+        padding: 0 0.625rem;
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.72rem;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
         color: var(--muted);
+      }
+      h1 {
+        margin: 0.875rem 0 0;
+        font-size: clamp(1.875rem, 5vw, 2.125rem);
+        font-weight: 600;
+        letter-spacing: -0.035em;
+        line-height: 1.05;
+        text-wrap: balance;
+      }
+      p {
+        margin: 0;
+      }
+      .description {
+        margin-top: 0.625rem;
+        color: var(--muted);
+        font-size: 0.96rem;
         line-height: 1.6;
       }
-      .panel h2 {
-        font-size: clamp(2rem, 5vw, 2.9rem);
-        line-height: 0.98;
-      }
-      .status,
-      .error {
-        margin-top: 1.25rem;
-        padding: 1rem 1.05rem;
-        border-radius: var(--radius-md);
+      .session-chip,
+      .scope-panel,
+      .error-banner {
+        border-radius: var(--radius);
         border: 1px solid var(--border);
       }
-      .status {
-        background: rgba(31, 107, 87, 0.06);
+      .session-chip,
+      .scope-panel {
+        margin-top: 1rem;
       }
-      .status strong {
-        display: block;
-        font-size: 0.92rem;
+      .session-chip {
+        background: var(--muted-background);
+        padding: 0.875rem 0.95rem;
       }
-      .status span {
+      .session-chip strong {
         display: block;
-        margin-top: 0.3rem;
+        font-size: 0.82rem;
+        font-weight: 600;
+        color: var(--foreground);
+      }
+      .session-chip span {
+        display: block;
+        margin-top: 0.25rem;
         color: var(--muted);
+        font-size: 0.9rem;
+        line-height: 1.5;
+        font-variant-numeric: tabular-nums;
+        overflow-wrap: anywhere;
+      }
+      .error-banner {
+        margin-top: 1rem;
+        padding: 0.9rem 0.95rem;
+        background: var(--destructive-background);
+        border-color: #fecaca;
+        color: var(--destructive);
         font-size: 0.92rem;
+        line-height: 1.55;
       }
-      .error {
-        border-color: color-mix(in srgb, var(--danger) 22%, white);
-        background: color-mix(in srgb, var(--danger) 9%, white);
-        color: var(--danger);
-      }
-      form {
-        margin-top: 1.5rem;
+      .form {
         display: grid;
         gap: 1rem;
       }
       .field {
         display: grid;
-        gap: 0.45rem;
+        gap: 0.5rem;
       }
       label {
         font-size: 0.92rem;
@@ -239,160 +195,148 @@ export function renderAuthorizePage(
       }
       input[type="password"] {
         width: 100%;
-        min-height: 3.1rem;
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        padding: 0.9rem 1rem;
-        background: white;
-        color: var(--text);
+        min-height: 2.875rem;
+        border: 1px solid var(--input);
+        border-radius: calc(var(--radius) - 0.125rem);
+        padding: 0.75rem 0.875rem;
+        background: #fff;
+        color: var(--foreground);
         font: inherit;
-        transition: border-color 160ms ease, box-shadow 160ms ease;
       }
-      input[type="password"]:focus {
+      input[type="password"]::placeholder {
+        color: #a1a1aa;
+      }
+      input[type="password"]:focus-visible,
+      button:focus-visible,
+      a:focus-visible,
+      input[type="checkbox"]:focus-visible {
         outline: none;
-        border-color: color-mix(in srgb, var(--accent) 60%, white);
-        box-shadow: 0 0 0 4px rgba(31, 107, 87, 0.12);
+        box-shadow: 0 0 0 3px var(--ring);
       }
       .hint,
-      .token-link {
-        margin: 0;
+      .link {
         color: var(--muted);
         font-size: 0.9rem;
         line-height: 1.55;
       }
-      .token-link {
-        text-decoration: none;
+      .link {
         width: fit-content;
+        text-decoration: none;
+        touch-action: manipulation;
       }
-      .token-link:hover {
-        color: var(--accent);
+      .link:hover {
+        color: var(--foreground);
       }
-      .scope-card {
+      .separator {
+        height: 1px;
+        background: var(--border);
+      }
+      .scope-panel {
+        padding: 0.875rem 0.95rem;
+        background: #fff;
+      }
+      .scope-list {
         display: grid;
-        gap: 0.9rem;
-        padding: 1rem;
-        border: 1px solid var(--border);
-        border-radius: var(--radius-lg);
-        background: rgba(17, 17, 17, 0.025);
+        gap: 0.875rem;
       }
-      .scope {
+      .scope-row {
         display: flex;
         gap: 0.75rem;
         align-items: flex-start;
       }
-      .scope input {
-        margin-top: 0.25rem;
+      .scope-row input[type="checkbox"] {
+        margin: 0.125rem 0 0;
+        accent-color: var(--foreground);
       }
       .scope-copy {
-        display: grid;
-        gap: 0.25rem;
+        min-width: 0;
       }
       .scope-copy strong {
-        font-size: 0.94rem;
+        display: block;
+        font-size: 0.92rem;
+        font-weight: 600;
+        line-height: 1.4;
       }
       .scope-copy span {
-        color: var(--muted);
-        font-size: 0.9rem;
-        line-height: 1.5;
-      }
-      .submit {
-        min-height: 3.1rem;
-        border: 0;
-        border-radius: var(--radius-md);
-        background: var(--accent);
-        color: white;
-        font: inherit;
-        font-weight: 600;
-        cursor: pointer;
-        transition: transform 160ms ease, background 160ms ease, box-shadow 160ms ease;
-      }
-      .submit:hover {
-        background: var(--accent-hover);
-        transform: translateY(-1px);
-        box-shadow: 0 14px 30px rgba(31, 107, 87, 0.18);
-      }
-      .footnote {
-        margin-top: 1.25rem;
+        display: block;
+        margin-top: 0.25rem;
         color: var(--muted);
         font-size: 0.88rem;
+        line-height: 1.5;
+      }
+      .button {
+        width: 100%;
+        min-height: 2.875rem;
+        border: 0;
+        border-radius: calc(var(--radius) - 0.125rem);
+        background: var(--primary);
+        color: var(--primary-foreground);
+        font: inherit;
+        font-size: 0.94rem;
+        font-weight: 600;
+        cursor: pointer;
+        touch-action: manipulation;
+        transition: background-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+      }
+      .button:hover {
+        background: var(--primary-hover);
+      }
+      .button:active {
+        transform: translateY(1px);
+      }
+      .meta-inline {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem 1rem;
+        color: var(--muted);
+        font-size: 0.85rem;
         line-height: 1.55;
       }
-      @media (max-width: 900px) {
-        .auth-card {
-          grid-template-columns: 1fr;
-        }
-        .intro {
-          padding-bottom: 2.25rem;
-        }
+      .meta-inline strong {
+        color: var(--foreground);
+        font-weight: 600;
       }
-      @media (max-width: 640px) {
-        .shell {
-          padding: 1rem;
-        }
-        .intro,
-        .panel {
-          padding: 1.5rem;
-        }
+      .footnote {
+        margin-top: 0.75rem;
+        color: var(--muted);
+        font-size: 0.85rem;
+        line-height: 1.55;
       }
-      @keyframes fade-up {
-        from {
-          opacity: 0;
-          transform: translateY(16px);
-        }
-        to {
-          opacity: 1;
-          transform: translateY(0);
+      .nowrap {
+        white-space: nowrap;
+      }
+      .mono {
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.8rem;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+          animation: none !important;
+          transition-duration: 0ms !important;
+          scroll-behavior: auto !important;
         }
       }
     </style>
   </head>
   <body>
-    <main class="shell">
-      <div class="auth-card">
-        <section class="intro">
-          <div class="badge">EdStem MCP</div>
-          <h1>Use Ed Discussion from any MCP client.</h1>
-          <p>One Ed API token is enough. No local password wall. Read access is always required, and write access stays opt-in.</p>
-
-          <ul class="feature-list">
-            <li>
-              <strong>Verified before storage</strong>
-              <span>Your token is checked against Ed before this service keeps anything.</span>
-            </li>
-            <li>
-              <strong>Single identity model</strong>
-              <span>Your Ed account is your account here. No extra sign-up ceremony.</span>
-            </li>
-            <li>
-              <strong>Write scope stays explicit</strong>
-              <span>Grant submission tools only when you actually want them.</span>
-            </li>
-          </ul>
-
-          <div class="meta">
-            <div>Client</div>
-            <code>${escapeHtml(clientName)}</code>
-            <div>Requested scopes</div>
-            <code>${escapeHtml(options.requestedScopes.join(" "))}</code>
-          </div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-header">
-            <div class="badge" style="color: var(--text); border-color: var(--border); background: rgba(17, 17, 17, 0.03);">Authorization</div>
-            <h2>Connect your Ed account</h2>
-            <p>This client wants access to your courses, lessons, threads, and activity through the public EdStem MCP service.</p>
-          </div>
-
+    <a class="skip-link" href="#main-content">Skip to Content</a>
+    <main id="main-content">
+      <section class="card" aria-labelledby="auth-title">
+        <div class="card-header">
+          <div class="eyebrow" translate="no">EdStem MCP</div>
+          <h1 id="auth-title">Connect Your Ed Account</h1>
+          <p class="description">Authorize this MCP client with your Ed API token. No email or password is required.</p>
           ${options.session ? `
-            <div class="status">
-              <strong>Current browser session</strong>
+            <div class="session-chip">
+              <strong>Current Browser Session</strong>
               <span>${escapeHtml(options.session.displayName)} · ${escapeHtml(options.session.email)}</span>
             </div>
           ` : ""}
-          ${options.errorMessage ? `<div class="error">${escapeHtml(options.errorMessage)}</div>` : ""}
+          ${options.errorMessage ? `<div class="error-banner" aria-live="polite">${escapeHtml(options.errorMessage)}</div>` : ""}
+        </div>
 
-          <form method="post" action="/authorize">
+        <div class="card-content">
+          <form method="post" action="/authorize" class="form" data-busy-label="Authorizing…">
             <input type="hidden" name="client_id" value="${escapeHtml(client.client_id)}">
             <input type="hidden" name="redirect_uri" value="${escapeHtml(options.params.redirectUri)}">
             <input type="hidden" name="response_type" value="code">
@@ -405,46 +349,70 @@ export function renderAuthorizePage(
             <input type="hidden" name="scope_read" value="1">
 
             <div class="field">
-              <label for="ed_token">Ed API token</label>
+              <label for="ed_token">Ed API Token</label>
               <input
                 id="ed_token"
                 name="ed_token"
                 type="password"
                 autocomplete="off"
+                spellcheck="false"
                 placeholder="${escapeHtml(tokenPlaceholder)}"
                 ${options.showEdToken ? "required" : ""}
               >
               <p class="hint">${escapeHtml(options.edTokenHint)}</p>
             </div>
 
-            <a class="token-link" href="https://edstem.org/settings/api-tokens" target="_blank" rel="noreferrer">Open Ed API token settings</a>
+            <a class="link" href="https://edstem.org/settings/api-tokens" target="_blank" rel="noreferrer">Open Ed API Token Settings</a>
 
-            <div class="scope-card">
-              <div class="scope">
-                <input type="checkbox" checked disabled>
-                <div class="scope-copy">
-                  <strong>Read your Ed courses, lessons, threads, and activity</strong>
-                  <span>Required for every MCP request.</span>
-                </div>
-              </div>
-              ${options.requestedScopes.includes("mcp:tools.write") ? `
-                <div class="scope">
-                  <input id="scope_write" name="scope_write" type="checkbox" value="1">
+            <div class="separator" aria-hidden="true"></div>
+
+            <div class="scope-panel">
+              <div class="scope-list">
+                <div class="scope-row">
+                  <input type="checkbox" checked disabled aria-label="Read access is required">
                   <div class="scope-copy">
-                    <label for="scope_write"><strong>Allow write tools</strong></label>
-                    <span>Only enable this if you want to submit quiz answers or submit slides.</span>
+                    <strong>Read courses, lessons, threads, and activity</strong>
+                    <span>Required for every MCP request.</span>
                   </div>
                 </div>
-              ` : ""}
+                ${options.requestedScopes.includes("mcp:tools.write") ? `
+                  <label class="scope-row" for="scope_write">
+                    <input id="scope_write" name="scope_write" type="checkbox" value="1">
+                    <span class="scope-copy">
+                      <strong>Allow write tools</strong>
+                      <span>Enable this only if you want quiz submission and slide submission tools.</span>
+                    </span>
+                  </label>
+                ` : ""}
+              </div>
             </div>
 
-            <button class="submit" type="submit">${escapeHtml(primaryAction)}</button>
+            <button class="button" type="submit">${escapeHtml(actionLabel)}</button>
           </form>
+        </div>
 
-          <p class="footnote">No country code is needed. This service uses the same Ed API token flow as edstem-cli.</p>
-        </section>
-      </div>
+        <div class="card-footer">
+          <div class="meta-inline">
+            <span><strong>Client</strong> ${escapeHtml(clientName)}</span>
+            <span><strong>Scopes</strong> <span class="mono" translate="no">${escapeHtml(options.requestedScopes.join(" "))}</span></span>
+          </div>
+          <p class="footnote">No country code needed. This uses the same token flow as <span class="nowrap" translate="no">edstem-cli</span>.</p>
+        </div>
+      </section>
     </main>
+    <script>
+      const form = document.querySelector('form[data-busy-label]');
+      if (form instanceof HTMLFormElement) {
+        form.addEventListener('submit', () => {
+          const button = form.querySelector('button[type="submit"]');
+          if (!(button instanceof HTMLButtonElement)) {
+            return;
+          }
+          button.disabled = true;
+          button.textContent = form.dataset.busyLabel || 'Authorizing…';
+        });
+      }
+    </script>
   </body>
 </html>`;
 }

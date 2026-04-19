@@ -1497,10 +1497,17 @@ function renderSessionRequiredPage(
   return renderStandalonePage({
     body: `
       <section class="card">
-        <div class="badge">Session required</div>
-        <h1>Sign in again</h1>
-        <p class="lead">${escapeHtml(detail)}</p>
-        <p class="muted">Then return to <code>${escapeHtml(kind)}</code>.</p>
+        <div class="card-header">
+          <div class="eyebrow" translate="no">EdStem MCP</div>
+          <h1>Sign In Again</h1>
+          <p class="description">${escapeHtml(detail)}</p>
+        </div>
+        <div class="card-content">
+          <div class="meta-row">
+            <span class="meta-label">Return To</span>
+            <span class="meta-value mono" translate="no">${escapeHtml(kind)}</span>
+          </div>
+        </div>
       </section>
     `,
     title: "Sign in first"
@@ -1511,9 +1518,11 @@ function renderDeletedPage(): string {
   return renderStandalonePage({
     body: `
       <section class="card">
-        <div class="badge">Connection removed</div>
-        <h1>Account deleted</h1>
-        <p class="lead">Your encrypted Ed token and local session were removed from this service.</p>
+        <div class="card-header">
+          <div class="eyebrow">Connection Removed</div>
+          <h1>Account Deleted</h1>
+          <p class="description">Your encrypted Ed token and local session were removed from this service.</p>
+        </div>
       </section>
     `,
     title: "Account deleted"
@@ -1529,38 +1538,44 @@ function renderSettingsPage(options: {
   return renderStandalonePage({
     body: `
       <section class="card">
-        <div class="badge">Connection settings</div>
-        <h1>${escapeHtml(options.session.displayName)}</h1>
-        <p class="lead">${escapeHtml(options.session.email)}</p>
-        <div class="summary-grid">
-          <div class="summary-item">
-            <span class="summary-label">Ed status</span>
-            <strong>${escapeHtml(formatConnectionStatus(options.status))}</strong>
-          </div>
-          <div class="summary-item">
-            <span class="summary-label">Last verified</span>
-            <strong>${escapeHtml(formatVerifiedAt(options.status.lastVerifiedAt))}</strong>
+        <div class="card-header">
+          <div class="eyebrow">Connection Settings</div>
+          <h1>Ed Connection</h1>
+          <p class="description">${escapeHtml(options.session.displayName)} · ${escapeHtml(options.session.email)}</p>
+        </div>
+        <div class="card-content">
+          <div class="meta-grid">
+            <div class="meta-row">
+              <span class="meta-label">Status</span>
+              <span class="meta-value">${escapeHtml(formatConnectionStatus(options.status))}</span>
+            </div>
+            <div class="meta-row">
+              <span class="meta-label">Last Verified</span>
+              <span class="meta-value">${escapeHtml(formatVerifiedAt(options.status.lastVerifiedAt))}</span>
+            </div>
           </div>
         </div>
       </section>
-      ${options.errorMessage ? `<section class="card error-card">${escapeHtml(options.errorMessage)}</section>` : ""}
       <section class="card">
-        <h2>Rotate Ed token</h2>
-        <p class="muted">Paste a fresh token for the same Ed account. If you want to switch accounts, start a new OAuth sign-in instead.</p>
-        <form method="post" action="/settings/rotate" class="form-stack">
-          <input type="hidden" name="csrf_token" value="${escapeHtml(options.csrfToken)}">
-          <label for="settings-ed-token">Ed API token</label>
-          <input id="settings-ed-token" type="password" name="ed_token" autocomplete="off" placeholder="Paste your new Ed API token">
-          <button type="submit">Update token</button>
-        </form>
-      </section>
-      <section class="card danger-card">
-        <h2>Danger zone</h2>
-        <p class="muted">Delete the local account record and encrypted token for this browser session.</p>
-        <form method="post" action="/settings/delete" onsubmit="return confirm('Delete this account?');" class="form-stack">
-          <input type="hidden" name="csrf_token" value="${escapeHtml(options.csrfToken)}">
-          <button type="submit" class="button-danger">Delete account</button>
-        </form>
+        <div class="card-header">
+          <h2>Rotate Ed Token</h2>
+          <p class="description">Paste a fresh token for the same Ed account. To switch accounts, start a new OAuth sign-in.</p>
+        </div>
+        <div class="card-content">
+          ${options.errorMessage ? `<div class="error-banner" aria-live="polite">${escapeHtml(options.errorMessage)}</div>` : ""}
+          <form method="post" action="/settings/rotate" class="form-stack" data-busy-label="Updating…">
+            <input type="hidden" name="csrf_token" value="${escapeHtml(options.csrfToken)}">
+            <label for="settings-ed-token">Ed API Token</label>
+            <input id="settings-ed-token" type="password" name="ed_token" autocomplete="off" spellcheck="false" placeholder="Paste your new Ed API token…">
+            <button type="submit">Update Ed Token</button>
+          </form>
+        </div>
+        <div class="card-footer">
+          <form method="post" action="/settings/delete" onsubmit="return confirm('Delete this account?');" data-busy-label="Deleting…">
+            <input type="hidden" name="csrf_token" value="${escapeHtml(options.csrfToken)}">
+            <button type="submit" class="button-destructive">Delete Local Account</button>
+          </form>
+        </div>
       </section>
     `,
     title: "Settings"
@@ -1576,21 +1591,32 @@ function renderReconnectPage(options: {
   return renderStandalonePage({
     body: `
       <section class="card">
-        <div class="badge">Reconnect Ed</div>
-        <h1>${escapeHtml(options.session.displayName)}</h1>
-        <p class="lead">${escapeHtml(options.session.email)}</p>
-        <p class="muted">${escapeHtml(formatConnectionStatus(options.status))}</p>
+        <div class="card-header">
+          <div class="eyebrow">Reconnect Ed</div>
+          <h1>Reconnect Ed Access</h1>
+          <p class="description">${escapeHtml(options.session.displayName)} · ${escapeHtml(options.session.email)}</p>
+        </div>
+        <div class="card-content">
+          <div class="meta-row">
+            <span class="meta-label">Status</span>
+            <span class="meta-value">${escapeHtml(formatConnectionStatus(options.status))}</span>
+          </div>
+        </div>
       </section>
-      ${options.errorMessage ? `<section class="card error-card">${escapeHtml(options.errorMessage)}</section>` : ""}
       <section class="card">
-        <h2>Paste a fresh Ed token</h2>
-        <p class="muted">This updates the token for the same Ed account and restores MCP access.</p>
-        <form method="post" action="/reconnect" class="form-stack">
-          <input type="hidden" name="csrf_token" value="${escapeHtml(options.csrfToken)}">
-          <label for="reconnect-ed-token">Ed API token</label>
-          <input id="reconnect-ed-token" type="password" name="ed_token" autocomplete="off" placeholder="Paste your Ed API token">
-          <button type="submit">Reconnect</button>
-        </form>
+        <div class="card-header">
+          <h2>Paste a Fresh Token</h2>
+          <p class="description">This restores MCP access for the same Ed account.</p>
+        </div>
+        <div class="card-content">
+          ${options.errorMessage ? `<div class="error-banner" aria-live="polite">${escapeHtml(options.errorMessage)}</div>` : ""}
+          <form method="post" action="/reconnect" class="form-stack" data-busy-label="Reconnecting…">
+            <input type="hidden" name="csrf_token" value="${escapeHtml(options.csrfToken)}">
+            <label for="reconnect-ed-token">Ed API Token</label>
+            <input id="reconnect-ed-token" type="password" name="ed_token" autocomplete="off" spellcheck="false" placeholder="Paste your Ed API token…">
+            <button type="submit">Reconnect Ed Access</button>
+          </form>
+        </div>
       </section>
     `,
     title: "Reconnect"
@@ -1606,179 +1632,247 @@ function renderStandalonePage(options: { body: string; title: string }): string 
     <title>${escapeHtml(options.title)}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
       :root {
         color-scheme: light;
-        --background: #f6f3ee;
-        --surface: rgba(255, 255, 255, 0.84);
-        --text: #171717;
-        --muted: #66615a;
-        --border: rgba(23, 23, 23, 0.1);
-        --accent: #1f6b57;
-        --accent-hover: #184f42;
-        --danger: #a13f35;
-        --radius-xl: 28px;
-        --radius-lg: 18px;
-        --radius-md: 14px;
-        --shadow: 0 30px 80px rgba(17, 17, 17, 0.12);
+        --background: #fafafa;
+        --foreground: #0f0f10;
+        --card: #ffffff;
+        --muted: #6b6b73;
+        --muted-background: #f4f4f5;
+        --border: #e4e4e7;
+        --input: #e4e4e7;
+        --ring: rgba(15, 15, 16, 0.12);
+        --primary: #18181b;
+        --primary-hover: #09090b;
+        --primary-foreground: #fafafa;
+        --destructive: #b42318;
+        --destructive-background: #fef3f2;
+        --radius: 0.875rem;
+        --shadow: 0 1px 2px rgba(15, 15, 16, 0.04), 0 12px 32px rgba(15, 15, 16, 0.06);
       }
-      * { box-sizing: border-box; }
+      * {
+        box-sizing: border-box;
+        -webkit-tap-highlight-color: rgba(15, 15, 16, 0.08);
+      }
+      html {
+        background: var(--background);
+      }
       body {
         margin: 0;
         min-height: 100vh;
-        background:
-          radial-gradient(circle at top left, rgba(31, 107, 87, 0.14), transparent 30%),
-          radial-gradient(circle at bottom right, rgba(23, 23, 23, 0.08), transparent 34%),
-          linear-gradient(180deg, #fbf9f5 0%, var(--background) 100%);
-        color: var(--text);
+        background: var(--background);
+        color: var(--foreground);
         font-family: "IBM Plex Sans", sans-serif;
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
       }
       main {
-        width: min(100%, 44rem);
-        margin: 0 auto;
-        padding: 2rem 1rem;
         min-height: 100vh;
         display: flex;
         align-items: center;
+        justify-content: center;
+        padding: 1.5rem;
+      }
+      .skip-link {
+        position: absolute;
+        top: 0.75rem;
+        left: 0.75rem;
+        transform: translateY(-160%);
+        border-radius: calc(var(--radius) - 0.125rem);
+        background: var(--foreground);
+        color: var(--primary-foreground);
+        padding: 0.625rem 0.875rem;
+        text-decoration: none;
+        transition: transform 160ms ease;
+      }
+      .skip-link:focus-visible {
+        transform: translateY(0);
       }
       .stack {
-        width: 100%;
-        display: grid;
+        width: min(100%, 29rem);
+        display: flex;
+        flex-direction: column;
         gap: 1rem;
       }
       .card {
         border: 1px solid var(--border);
-        border-radius: var(--radius-lg);
-        background: color-mix(in srgb, var(--surface) 92%, white);
-        padding: 1.5rem;
+        border-radius: calc(var(--radius) + 0.125rem);
+        background: var(--card);
         box-shadow: var(--shadow);
-        backdrop-filter: blur(20px);
       }
-      .badge {
+      .card-header,
+      .card-content,
+      .card-footer {
+        padding-inline: 1.5rem;
+      }
+      .card-header {
+        padding-top: 1.5rem;
+        padding-bottom: 1rem;
+      }
+      .card-content {
+        padding-bottom: 1.25rem;
+      }
+      .card-footer {
+        padding-bottom: 1.5rem;
+      }
+      .eyebrow {
         display: inline-flex;
         align-items: center;
-        min-height: 2rem;
-        padding: 0.3rem 0.75rem;
-        border: 1px solid var(--border);
+        min-height: 1.75rem;
         border-radius: 999px;
-        background: rgba(17, 17, 17, 0.03);
+        border: 1px solid var(--border);
+        padding: 0 0.625rem;
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.72rem;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      h1,
+      h2 {
+        margin: 0;
+        font-weight: 600;
+        letter-spacing: -0.035em;
+        text-wrap: balance;
+      }
+      h1 {
+        margin-top: 0.875rem;
+        font-size: clamp(1.875rem, 5vw, 2.125rem);
+        line-height: 1.05;
+      }
+      h2 {
+        font-size: 1.125rem;
+        line-height: 1.2;
+      }
+      .description,
+      .muted {
+        margin-top: 0.625rem;
+        color: var(--muted);
+        font-size: 0.95rem;
+        line-height: 1.6;
+      }
+      .meta-grid {
+        display: grid;
+        gap: 0.75rem;
+      }
+      .meta-row,
+      .error-banner {
+        border-radius: var(--radius);
+        border: 1px solid var(--border);
+        padding: 0.875rem 0.95rem;
+      }
+      .meta-row {
+        background: var(--muted-background);
+      }
+      .meta-label {
+        display: block;
+        color: var(--muted);
         font-size: 0.82rem;
         font-weight: 600;
       }
-      h1, h2 {
-        margin: 0;
-        font-family: "Instrument Serif", serif;
-        font-weight: 400;
-        letter-spacing: -0.03em;
-      }
-      h1 {
-        margin-top: 0.9rem;
-        font-size: clamp(2.3rem, 6vw, 3.4rem);
-        line-height: 0.95;
-      }
-      h2 {
-        font-size: 1.7rem;
-        line-height: 1;
-      }
-      .lead {
-        margin: 0.7rem 0 0;
-        color: var(--text);
-        font-size: 1rem;
-        line-height: 1.65;
-      }
-      .muted {
-        margin: 0.7rem 0 0;
-        color: var(--muted);
-        line-height: 1.6;
-      }
-      .summary-grid {
-        margin-top: 1.25rem;
-        display: grid;
-        gap: 0.85rem;
-        grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
-      }
-      .summary-item {
-        padding: 1rem;
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        background: rgba(17, 17, 17, 0.025);
-      }
-      .summary-label {
+      .meta-value {
         display: block;
-        color: var(--muted);
-        font-size: 0.82rem;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
+        margin-top: 0.25rem;
+        font-size: 0.9rem;
+        line-height: 1.5;
+        font-variant-numeric: tabular-nums;
+        overflow-wrap: anywhere;
       }
-      .summary-item strong {
-        display: block;
-        margin-top: 0.35rem;
-        font-size: 0.98rem;
+      .mono {
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 0.8rem;
       }
       .form-stack {
-        margin-top: 1rem;
         display: grid;
-        gap: 0.85rem;
+        gap: 1rem;
       }
       label {
         font-size: 0.92rem;
         font-weight: 600;
       }
-      input, button {
+      input,
+      button {
         width: 100%;
-        min-height: 3rem;
-        border-radius: var(--radius-md);
+        min-height: 2.875rem;
+        border-radius: calc(var(--radius) - 0.125rem);
         font: inherit;
       }
       input {
-        border: 1px solid var(--border);
-        padding: 0.85rem 1rem;
+        border: 1px solid var(--input);
+        padding: 0.75rem 0.875rem;
         background: white;
       }
-      input:focus {
+      input::placeholder {
+        color: #a1a1aa;
+      }
+      input:focus-visible,
+      button:focus-visible {
         outline: none;
-        border-color: color-mix(in srgb, var(--accent) 60%, white);
-        box-shadow: 0 0 0 4px rgba(31, 107, 87, 0.12);
+        box-shadow: 0 0 0 3px var(--ring);
       }
       button {
         border: 0;
-        background: var(--accent);
-        color: white;
+        background: var(--primary);
+        color: var(--primary-foreground);
         font-weight: 600;
         cursor: pointer;
+        touch-action: manipulation;
+        transition: background-color 160ms ease, transform 160ms ease;
       }
       button:hover {
-        background: var(--accent-hover);
+        background: var(--primary-hover);
       }
-      .danger-card {
-        border-color: color-mix(in srgb, var(--danger) 18%, white);
+      button:active {
+        transform: translateY(1px);
       }
-      .error-card {
+      .error-banner {
+        margin-bottom: 1rem;
         color: var(--danger);
-        border-color: color-mix(in srgb, var(--danger) 18%, white);
-        background: color-mix(in srgb, var(--danger) 8%, white);
+        background: var(--destructive-background);
+        border-color: #fecaca;
       }
-      .button-danger {
-        background: var(--danger);
+      .button-destructive {
+        background: var(--destructive);
       }
-      .button-danger:hover {
-        background: #8d352c;
+      .button-destructive:hover {
+        background: #991b1b;
       }
-      code {
-        font-size: 0.9em;
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+          animation: none !important;
+          transition-duration: 0ms !important;
+          scroll-behavior: auto !important;
+        }
       }
       @media (max-width: 640px) {
         main {
           padding: 1rem;
         }
-        .card {
-          padding: 1.25rem;
-        }
       }
     </style>
   </head>
-  <body><main><div class="stack">${options.body}</div></main></body>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to Content</a>
+    <main id="main-content"><div class="stack">${options.body}</div></main>
+    <script>
+      for (const form of document.querySelectorAll('form[data-busy-label]')) {
+        if (!(form instanceof HTMLFormElement)) {
+          continue;
+        }
+        form.addEventListener('submit', () => {
+          const button = form.querySelector('button[type="submit"]');
+          if (!(button instanceof HTMLButtonElement)) {
+            return;
+          }
+          button.disabled = true;
+          button.textContent = form.dataset.busyLabel || 'Working…';
+        });
+      }
+    </script>
+  </body>
 </html>`;
 }
 
