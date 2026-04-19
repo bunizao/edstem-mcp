@@ -51,10 +51,10 @@ import {
 
 const AUTHORIZATION_CODE_TTL_MS = 10 * 60 * 1000;
 
-class TocConsentRequiredError extends Error {
+class TosConsentRequiredError extends Error {
   constructor() {
-    super("You must agree to the Terms of Connection and Token Handling before continuing.");
-    this.name = "TocConsentRequiredError";
+    super("You must agree to the Terms of Service before continuing.");
+    this.name = "TosConsentRequiredError";
   }
 }
 
@@ -427,7 +427,7 @@ export class EdstemOAuthProvider {
     user: { displayName: string; email: string; expiresAt: number; userId: number };
   }> {
     if (getFormField(body?.accept_toc) !== "1") {
-      throw new TocConsentRequiredError();
+      throw new TosConsentRequiredError();
     }
 
     const edToken = getFormField(body?.ed_token);
@@ -557,7 +557,7 @@ function buildAuthorizeRedirectUrl(
 
 function mapAuthorizeErrorMessage(error: unknown): string {
   if (
-    error instanceof TocConsentRequiredError ||
+    error instanceof TosConsentRequiredError ||
     error instanceof EdTokenInvalidError ||
     error instanceof EdApiBaseUrlError ||
     error instanceof EdNotConnectedError ||
@@ -573,7 +573,7 @@ function mapAuthorizeErrorMessage(error: unknown): string {
 
 function mapAuthorizeStatusCode(error: unknown): number {
   if (
-    error instanceof TocConsentRequiredError ||
+    error instanceof TosConsentRequiredError ||
     error instanceof EdTokenInvalidError ||
     error instanceof EdApiBaseUrlError ||
     error instanceof EdNotConnectedError ||
@@ -603,7 +603,7 @@ function shouldShowEdToken(
 }
 
 function mapAuthorizeAuditReason(error: unknown): string {
-  if (error instanceof TocConsentRequiredError) {
+  if (error instanceof TosConsentRequiredError) {
     return "toc_not_accepted";
   }
   if (error instanceof EdTokenInvalidError) {

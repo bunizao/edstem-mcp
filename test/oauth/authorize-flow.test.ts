@@ -165,7 +165,7 @@ describe("oauth authorize flow", () => {
     expect(runtime.users.findByEmail("ada@example.com")).toBeNull();
   });
 
-  it("requires ToC consent before issuing authorization", async () => {
+  it("requires Terms of Service consent before issuing authorization", async () => {
     const fakeEd = await startFakeEdServer([
       {
         courses: [],
@@ -224,6 +224,6 @@ describe("oauth authorize flow", () => {
     });
 
     expect(response.status).toBe(422);
-    expect(await response.text()).toContain("Terms of Connection and Token Handling");
+    expect(await response.text()).toContain("Terms of Service");
   });
 });
