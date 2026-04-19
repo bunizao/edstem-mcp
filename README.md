@@ -1,77 +1,30 @@
 # edstem-mcp
 
-Public MCP service for Ed Discussion. Use the hosted endpoint from your MCP client first; self-hosting details are below.
+Use Ed Discussion from any MCP client.
 
-## Using The Service
+## Quick Start
 
 1. Add the service URL to your MCP client.
 2. Sign in with your Ed API token.
 3. Grant `mcp:tools.read`, and `mcp:tools.write` only if you want write tools.
 
-You can get your token here: [https://edstem.org/settings/api-tokens](https://edstem.org/settings/api-tokens)
+Get your token here: [https://edstem.org/settings/api-tokens](https://edstem.org/settings/api-tokens)
 
-No country code is needed. This service follows the same Ed token flow as [edstem-cli](https://github.com/bunizao/edstem-cli): it verifies the token with `GET /api/user`.
+No country code is needed. This uses the same Ed API token flow as [edstem-cli](https://github.com/bunizao/edstem-cli): the token is verified with `GET /api/user`.
 
-## Tools
+## What It Can Do
 
-- `get_user`
-- `list_courses`
-- `list_lessons`
-- `get_lesson`
-- `list_slide_questions`
-- `list_slide_responses`
-- `list_threads`
-- `get_thread`
-- `get_course_thread`
-- `list_activity`
-- `submit_slide_answer`
-- `submit_slide`
+- View your Ed profile and enrolled courses
+- Browse lessons, slides, threads, and activity
+- Open thread details by thread ID or course thread number
+- Submit slide answers and submit slides if you grant write access
 
 ## Self-Hosting
 
-### Requirements
+Ignore this if you are just using the public service.
 
 - Bun 1.3+
 - `MASTER_KEY` as a 32-byte base64 string
-
-### Scripts
-
-```bash
-bun install
-bun run dev
-bun run test
-bun run check
-bun run build
-bun run admin -- reset-password <email> [new-password]
-bun run db:prune
-```
-
-### Environment
-
-- Copy `.env.example` to `.env` and fill in `MASTER_KEY`.
-- `MASTER_KEY`: required, 32-byte base64 key for Ed token encryption
-- `DATABASE_PATH`: optional, defaults to `.data/edstem-mcp.db`
-- `DB_CLEANUP_INTERVAL_SECONDS`: optional, defaults to `900`
-- `PUBLIC_BASE_URL`: required for self-hosting, must match the real external URL
-- `PORT`: optional, defaults to `8787`
-- `MCP_PATH`: optional, defaults to `/mcp`
-- `ED_API_BASE_URL`: optional, defaults to `https://edstem.org/api/`
-- `ED_API_TOKEN`: optional Bun-local fallback for development only
-- `OAUTH_ACCESS_TOKEN_TTL_SECONDS`: optional, defaults to `3600`
-- `OAUTH_REFRESH_TOKEN_TTL_SECONDS`: optional, defaults to `2592000`
-
-### Local Run
-
-```bash
-cp .env.example .env
-# Fill in MASTER_KEY and PUBLIC_BASE_URL first.
-bun run start
-```
-
-Health endpoints:
-
-- `/healthz`
-- `/readyz`
 
 ### Docker
 
@@ -81,15 +34,21 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-The image ships with a `readyz` health check.
-
-### Backup
-
-Use the included scripts:
+### Local Run
 
 ```bash
-./scripts/backup-db.sh .data/edstem-mcp.db
-./scripts/restore-db.sh backups/edstem-mcp-YYYYMMDD-HHMMSS.db .data/edstem-mcp.db
+bun install
+cp .env.example .env
+# Fill in MASTER_KEY and PUBLIC_BASE_URL first.
+bun run start
 ```
+
+### Notes
+
+- `PUBLIC_BASE_URL` must match the real external URL clients use.
+- Health endpoints: `/healthz` and `/readyz`
+- The image ships with a `readyz` health check.
+- Backups: `./scripts/backup-db.sh .data/edstem-mcp.db`
+- Restores: `./scripts/restore-db.sh backups/edstem-mcp-YYYYMMDD-HHMMSS.db .data/edstem-mcp.db`
 
 For restores, stop the app first. For Docker deployments, point the scripts at the mounted volume path.
