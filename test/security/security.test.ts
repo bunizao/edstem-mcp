@@ -7,7 +7,7 @@ import type { Logger } from "../../src/logger.js";
 import { startFakeEdServer } from "../support/fake-ed-server.js";
 import { startAppServer } from "../support/start-app-server.js";
 import { BrowserSession } from "../support/browser-session.js";
-import { createTestRuntime, extractCsrfToken } from "../support/test-runtime.js";
+import { createTestRuntime, extractCsrfToken, upsertTestUser } from "../support/test-runtime.js";
 
 const TEST_CLIENT: OAuthClientInformationFull = {
   client_id: "test-client",
@@ -70,9 +70,10 @@ describe("security hardening", () => {
     });
     cleanups.push(cleanup);
 
-    const user = await runtime.users.register({
+    const user = upsertTestUser(runtime, {
       email: "ada@example.com",
-      password: "this-is-secure"
+      id: 101,
+      name: "Ada"
     });
     const expiredSessionCookie = buildSessionCookie(
       {
@@ -121,9 +122,10 @@ describe("security hardening", () => {
     });
     cleanups.push(cleanup);
 
-    const user = await runtime.users.register({
+    const user = upsertTestUser(runtime, {
       email: "ada@example.com",
-      password: "this-is-secure"
+      id: 101,
+      name: "Ada"
     });
     const sessionCookie = buildSessionCookie(
       {
@@ -169,11 +171,11 @@ describe("security hardening", () => {
 
     const browser = new BrowserSession();
     for (let attempt = 0; attempt < 5; attempt += 1) {
-      const response = await submitAuthorize(browser, app.baseUrl, "bad-token", "ada@example.com");
+      const response = await submitAuthorize(browser, app.baseUrl, "bad-token");
       expect(response.status).toBe(422);
     }
 
-    const blocked = await submitAuthorize(browser, app.baseUrl, "bad-token", "ada@example.com");
+    const blocked = await submitAuthorize(browser, app.baseUrl, "bad-token");
     expect(blocked.status).toBe(429);
     expect(blocked.headers.get("Retry-After")).toBeTruthy();
     expect(await blocked.text()).toContain("Too many attempts");
@@ -208,10 +210,10 @@ describe("security hardening", () => {
     cleanups.push(async () => app.close());
 
     const browser = new BrowserSession();
-    const denied = await submitAuthorize(browser, app.baseUrl, "bad-token", "ada@example.com");
+    const denied = await submitAuthorize(browser, app.baseUrl, "bad-token");
     expect(denied.status).toBe(422);
 
-    const approved = await submitAuthorize(browser, app.baseUrl, "ed-token-a", "ada@example.com");
+    const approved = await submitAuthorize(browser, app.baseUrl, "ed-token-a");
     expect(approved.status).toBe(302);
 
     expect(
@@ -235,8 +237,7 @@ describe("security hardening", () => {
 async function submitAuthorize(
   browser: BrowserSession,
   baseUrl: string,
-  edToken: string,
-  email: string
+  edToken: string
 ): Promise<Response> {
   const page = await browser.fetch(
     `${baseUrl}/authorize?${new URLSearchParams({
@@ -264,12 +265,7 @@ async function submitAuthorize(
       redirect_uri: TEST_CLIENT.redirect_uris[0]!,
       response_type: "code",
       scope: "mcp:tools.read",
-      scope_read: "1",
-      signup_confirm_password: "this-is-secure",
-      signup_display_name: "Ada",
-      signup_email: email,
-      signup_password: "this-is-secure",
-      tab: "signup"
+      scope_read: "1"
     }),
     headers: {
       "Content-Type": "application/x-www-form-urlencoded"

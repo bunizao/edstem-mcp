@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { loadConfig } from "../../src/config.js";
 import { createRuntime } from "../../src/runtime.js";
+import { upsertTestUser } from "../support/test-runtime.js";
 
 const TEST_MASTER_KEY = Buffer.alloc(32, 9).toString("base64");
 
@@ -36,9 +37,10 @@ describe("sqlite runtime", () => {
     cleanups.push(async () => runtimeB.close());
     cleanups.push(async () => runtimeA.close());
 
-    const user = await runtimeA.users.register({
+    const user = upsertTestUser(runtimeA, {
       email: "ada@example.com",
-      password: "this-is-secure"
+      id: 101,
+      name: "Ada"
     });
 
     expect(runtimeB.users.findByEmail("ada@example.com")?.id).toBe(user.id);

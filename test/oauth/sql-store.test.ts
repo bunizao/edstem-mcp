@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 
 import type { OAuthClientInformationFull } from "@modelcontextprotocol/sdk/shared/auth.js";
 
-import { createTestRuntime } from "../support/test-runtime.js";
+import { createTestRuntime, upsertTestUser } from "../support/test-runtime.js";
 
 describe("oauth sql store", () => {
   const cleanups: Array<() => Promise<void>> = [];
@@ -33,9 +33,10 @@ describe("oauth sql store", () => {
       client_id: "test-client"
     });
 
-    const user = await runtime.users.register({
+    const user = upsertTestUser(runtime, {
       email: "ada@example.com",
-      password: "this-is-secure"
+      id: 101,
+      name: "Ada"
     });
 
     runtime.store.saveAuthorizationCode("code-1", {

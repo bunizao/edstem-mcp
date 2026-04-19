@@ -85,12 +85,7 @@ describe("oauth authorize flow", () => {
         response_type: "code",
         scope: "mcp:tools.read mcp:tools.write",
         scope_read: "1",
-        scope_write: "1",
-        signup_confirm_password: "this-is-secure",
-        signup_display_name: "Ada",
-        signup_email: "ada@example.com",
-        signup_password: "this-is-secure",
-        tab: "signup"
+        scope_write: "1"
       }),
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -155,11 +150,7 @@ describe("oauth authorize flow", () => {
         redirect_uri: TEST_CLIENT.redirect_uris[0]!,
         response_type: "code",
         scope: "mcp:tools.read",
-        scope_read: "1",
-        signup_confirm_password: "this-is-secure",
-        signup_email: "ada@example.com",
-        signup_password: "this-is-secure",
-        tab: "signup"
+        scope_read: "1"
       }),
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",

@@ -23,9 +23,13 @@ import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 
 import type { AppConfig, OAuthConfig } from "../config.js";
 import { CredentialsService, EdNotConnectedError, EdReconnectRequiredError } from "../credentials/service.js";
-import { EdApiBaseUrlError, EdTokenInvalidError } from "../credentials/verifier.js";
+import {
+  EdApiBaseUrlError,
+  EdTokenInvalidError,
+  verifyEdToken
+} from "../credentials/verifier.js";
 import type { Logger } from "../logger.js";
-import { UsersService, DuplicateEmailError, InvalidCredentialsError, PasswordPolicyError } from "../users/service.js";
+import { UsersService } from "../users/service.js";
 import { renderAuthorizePage as renderAuthorizeHtml } from "./login-page.js";
 import type { AuthorizeResponse } from "./http.js";
 import {
@@ -71,6 +75,7 @@ export class EdstemOAuthProvider {
   readonly clientsStore: OAuthRegisteredClientsStore;
   readonly skipLocalPkceValidation = false;
   private readonly config: OAuthConfig;
+  private readonly apiBaseUrl: string;
   private readonly credentials: CredentialsService;
   private readonly logger: Logger;
   private readonly resourceUrl: URL;
@@ -85,6 +90,7 @@ export class EdstemOAuthProvider {
     users: UsersService;
   }) {
     this.config = dependencies.config.oauth;
+    this.apiBaseUrl = dependencies.config.apiBaseUrl;
     this.credentials = dependencies.credentials;
     this.logger = dependencies.logger;
     this.resourceUrl = resourceUrlFromServerUrl(this.config.mcpServerUrl);
@@ -102,6 +108,7 @@ export class EdstemOAuthProvider {
     const sessionState = readSessionStateFromCookieHeader(request.headers.cookie, this.config);
     const session = sessionState.session;
     const requestedScopes = normalizeRequestedScopes(params.scopes, this.config);
+    const canReuseSession = session ? canContinueWithSession(this.credentials, session.userId) : false;
     const csrf = ensureCsrfToken(request.headers.cookie);
 
     if (csrf.cookie) {
@@ -120,11 +127,10 @@ export class EdstemOAuthProvider {
             csrf.token,
             session,
             {
-              edTokenHint: session
-                ? "Leave blank if your Ed connection is still valid."
+              edTokenHint: canReuseSession
+                ? "Leave this blank to reuse your current browser session."
                 : "Paste your Ed API token here.",
-              selectedTab: "signin",
-              showEdToken: !session
+              showEdToken: !canReuseSession
             }
           )
         );
@@ -142,8 +148,7 @@ export class EdstemOAuthProvider {
           {
             edTokenHint: "Refresh the page and try again.",
             errorMessage: "Your session expired. Reload the page and try again.",
-            selectedTab: getTab(request.body?.tab),
-            showEdToken: !session
+            showEdToken: !canReuseSession
           }
         )
       );
@@ -167,7 +172,6 @@ export class EdstemOAuthProvider {
       await this.finishAuthorization(client, params, nextSession, result.grantedScopes, res);
     } catch (error) {
       const message = mapAuthorizeErrorMessage(error);
-      const selectedTab = getTab(request.body?.tab);
       const statusCode = mapAuthorizeStatusCode(error);
 
       this.logger.warn(
@@ -177,7 +181,6 @@ export class EdstemOAuthProvider {
           event: "oauth.authorize.denied",
           requestedScopes,
           statusCode,
-          tab: selectedTab,
           userId: session?.userId
         },
         "oauth authorize denied"
@@ -189,17 +192,13 @@ export class EdstemOAuthProvider {
           params,
           requestedScopes,
           csrf.token,
-          sessionState.reason === "valid" ? session : null,
-          {
-            edTokenHint: mapEdTokenHint(error, session),
-            errorMessage: message,
-            selectedTab,
-            showEdToken: shouldShowEdToken(error, session),
-            signInEmail: getFormField(request.body?.signin_email) || session?.email,
-            signUpDisplayName: getFormField(request.body?.signup_display_name) || session?.displayName,
-            signUpEmail: getFormField(request.body?.signup_email) || session?.email
-          }
-        )
+            sessionState.reason === "valid" ? session : null,
+            {
+              edTokenHint: mapEdTokenHint(error, session),
+              errorMessage: message,
+              showEdToken: shouldShowEdToken(error, session, canReuseSession)
+            }
+          )
       );
     }
   }
@@ -418,45 +417,26 @@ export class EdstemOAuthProvider {
       expiresAt: number;
       userId: number;
     } | null
-  ): Promise<{ grantedScopes: string[]; user: { displayName: string; email: string; expiresAt: number; userId: number } }> {
-    const tab = getTab(body?.tab);
-    if (tab === "signup") {
-      const displayName = getFormField(body?.signup_display_name) || undefined;
-      const email = getFormField(body?.signup_email);
-      const password = getFormField(body?.signup_password);
-      const confirmPassword = getFormField(body?.signup_confirm_password);
-      if (password !== confirmPassword) {
-        throw new PasswordPolicyError("Passwords do not match.");
+  ): Promise<{
+    grantedScopes: string[];
+    user: { displayName: string; email: string; expiresAt: number; userId: number };
+  }> {
+    const edToken = getFormField(body?.ed_token);
+    if (!edToken) {
+      if (!existingSession || !canContinueWithSession(this.credentials, existingSession.userId)) {
+        throw new EdTokenInvalidError("An Ed API token is required to continue.");
       }
-      const user = await this.users.register({ displayName, email, password });
-      const edToken = getFormField(body?.ed_token);
-      if (!edToken) {
-        this.users.deleteAccount(user.id);
-        throw new EdTokenInvalidError("An Ed API token is required to finish sign up.");
-      }
-      try {
-        await this.credentials.connect(user.id, edToken);
-      } catch (error) {
-        this.users.deleteAccount(user.id);
-        throw error;
-      }
+
+      const user = this.users.getById(existingSession.userId);
       return {
         grantedScopes: selectGrantedScopes(requestedScopes, body),
         user: createSessionForUser(user, this.config.sessionTtlSeconds)
       };
     }
 
-    const email = getFormField(body?.signin_email) || existingSession?.email || "";
-    const password = getFormField(body?.signin_password);
-    const user = await this.users.authenticate(email, password);
-
-    const connection = this.credentials.getConnectionStatus(user.id);
-    const edToken = getFormField(body?.ed_token);
-    if (edToken) {
-      await this.credentials.connect(user.id, edToken);
-    } else if (!connection.connected || connection.isInvalid) {
-      throw new EdTokenInvalidError("An Ed API token is required to finish sign in.");
-    }
+    const verified = await verifyEdToken(edToken, this.apiBaseUrl);
+    const user = this.users.upsertFromEdIdentity(verified);
+    this.credentials.connectVerified(user.id, edToken, verified);
 
     return {
       grantedScopes: selectGrantedScopes(requestedScopes, body),
@@ -521,10 +501,6 @@ function validateScopes(requested: string[], granted: string[]): string[] {
   return Array.from(new Set(requested));
 }
 
-function getTab(value: unknown): "signin" | "signup" {
-  return value === "signup" ? "signup" : "signin";
-}
-
 function getFormField(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -538,11 +514,7 @@ function renderAuthorizePage(
   options: {
     edTokenHint: string;
     errorMessage?: string;
-    selectedTab: "signin" | "signup";
     showEdToken: boolean;
-    signInEmail?: string;
-    signUpDisplayName?: string;
-    signUpEmail?: string;
   }
 ): string {
   return renderAuthorizeHtml(client, {
@@ -551,17 +523,13 @@ function renderAuthorizePage(
     errorMessage: options.errorMessage,
     params,
     requestedScopes,
-    selectedTab: options.selectedTab,
     session: session
       ? {
           displayName: session.displayName,
           email: session.email
         }
       : undefined,
-    showEdToken: options.showEdToken,
-    signInEmail: options.signInEmail,
-    signUpDisplayName: options.signUpDisplayName,
-    signUpEmail: options.signUpEmail
+    showEdToken: options.showEdToken
   });
 }
 
@@ -580,9 +548,6 @@ function buildAuthorizeRedirectUrl(
 
 function mapAuthorizeErrorMessage(error: unknown): string {
   if (
-    error instanceof DuplicateEmailError ||
-    error instanceof InvalidCredentialsError ||
-    error instanceof PasswordPolicyError ||
     error instanceof EdTokenInvalidError ||
     error instanceof EdApiBaseUrlError ||
     error instanceof EdNotConnectedError ||
@@ -598,17 +563,12 @@ function mapAuthorizeErrorMessage(error: unknown): string {
 
 function mapAuthorizeStatusCode(error: unknown): number {
   if (
-    error instanceof DuplicateEmailError ||
-    error instanceof PasswordPolicyError ||
     error instanceof EdTokenInvalidError ||
     error instanceof EdApiBaseUrlError ||
     error instanceof EdNotConnectedError ||
     error instanceof EdReconnectRequiredError
   ) {
     return 422;
-  }
-  if (error instanceof InvalidCredentialsError) {
-    return 401;
   }
   if (error instanceof AccessDeniedError) {
     return 403;
@@ -624,31 +584,23 @@ function mapEdTokenHint(error: unknown, session: { email: string } | null): stri
     return error.message;
   }
   if (session) {
-    return "Leave this blank if your existing Ed connection is still valid.";
+    return "Leave this blank to reuse your current browser session.";
   }
   return "Paste your Ed API token here.";
 }
 
 function shouldShowEdToken(
   error: unknown,
-  session: { email: string } | null
+  session: { email: string } | null,
+  canReuseSession: boolean
 ): boolean {
   if (error instanceof EdTokenInvalidError || error instanceof EdApiBaseUrlError) {
     return true;
   }
-  return !session;
+  return !session || !canReuseSession;
 }
 
 function mapAuthorizeAuditReason(error: unknown): string {
-  if (error instanceof DuplicateEmailError) {
-    return "duplicate_email";
-  }
-  if (error instanceof InvalidCredentialsError) {
-    return "invalid_credentials";
-  }
-  if (error instanceof PasswordPolicyError) {
-    return "password_policy";
-  }
   if (error instanceof EdTokenInvalidError) {
     return "invalid_ed_token";
   }
@@ -668,4 +620,9 @@ function mapAuthorizeAuditReason(error: unknown): string {
     return error.name;
   }
   return "unknown_error";
+}
+
+function canContinueWithSession(credentials: CredentialsService, userId: number): boolean {
+  const connection = credentials.getConnectionStatus(userId);
+  return connection.connected && !connection.isInvalid;
 }

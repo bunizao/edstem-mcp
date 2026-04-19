@@ -62,3 +62,18 @@ export function issueAccessToken(runtime: Runtime, options: {
   });
   return token;
 }
+
+export function upsertTestUser(
+  runtime: Runtime,
+  options: {
+    email: string;
+    id: number;
+    name?: string;
+  }
+) {
+  return runtime.users.upsertFromEdIdentity({
+    edUserEmail: options.email,
+    edUserId: options.id,
+    edUserName: options.name ?? options.email
+  });
+}

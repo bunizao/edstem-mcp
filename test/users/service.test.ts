@@ -1,9 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 
-import {
-  DuplicateEmailError,
-  InvalidCredentialsError
-} from "../../src/users/service.js";
+import { EdIdentityMismatchError } from "../../src/users/service.js";
 import { createTestRuntime } from "../support/test-runtime.js";
 
 describe("users service", () => {
@@ -15,55 +12,71 @@ describe("users service", () => {
     }
   });
 
-  it("registers and authenticates a user", async () => {
+  it("upserts a user from Ed identity and reuses the same row on repeat sign-ins", async () => {
     const { runtime, cleanup } = await createTestRuntime({
       apiBaseUrl: "http://127.0.0.1:1/api/"
     });
     cleanups.push(cleanup);
 
-    await runtime.users.register({
-      email: "ada@example.com",
-      password: "this-is-secure",
-      displayName: "Ada"
+    const first = runtime.users.upsertFromEdIdentity({
+      edUserEmail: "ada@example.com",
+      edUserId: 101,
+      edUserName: "Ada"
+    });
+    const second = runtime.users.upsertFromEdIdentity({
+      edUserEmail: "Ada@Example.com",
+      edUserId: 101,
+      edUserName: "Ada Lovelace"
     });
 
-    const user = await runtime.users.authenticate("ada@example.com", "this-is-secure");
-    expect(user.email).toBe("ada@example.com");
-    expect(user.displayName).toBe("Ada");
+    expect(second.id).toBe(first.id);
+    expect(second.email).toBe("ada@example.com");
+    expect(second.displayName).toBe("Ada Lovelace");
   });
 
-  it("rejects duplicate emails", async () => {
+  it("migrates a legacy email row onto the verified Ed identity", async () => {
     const { runtime, cleanup } = await createTestRuntime({
       apiBaseUrl: "http://127.0.0.1:1/api/"
     });
     cleanups.push(cleanup);
 
-    await runtime.users.register({
-      email: "ada@example.com",
-      password: "this-is-secure"
+    const legacy = runtime.users.upsertFromEdIdentity({
+      edUserEmail: "ada@example.com",
+      edUserId: 101,
+      edUserName: "Ada"
     });
 
-    await expect(
-      runtime.users.register({
-        email: "Ada@Example.com",
-        password: "this-is-secure"
+    runtime.db.query("UPDATE users SET ed_user_id = NULL WHERE id = ?").run(legacy.id);
+
+    const migrated = runtime.users.upsertFromEdIdentity({
+      edUserEmail: "ada@example.com",
+      edUserId: 202,
+      edUserName: "Ada Updated"
+    });
+
+    expect(migrated.id).toBe(legacy.id);
+    expect(migrated.edUserId).toBe(202);
+    expect(migrated.displayName).toBe("Ada Updated");
+  });
+
+  it("rejects binding a different Ed account onto an existing user", async () => {
+    const { runtime, cleanup } = await createTestRuntime({
+      apiBaseUrl: "http://127.0.0.1:1/api/"
+    });
+    cleanups.push(cleanup);
+
+    const user = runtime.users.upsertFromEdIdentity({
+      edUserEmail: "ada@example.com",
+      edUserId: 101,
+      edUserName: "Ada"
+    });
+
+    expect(() =>
+      runtime.users.syncIdentity(user.id, {
+        edUserEmail: "grace@example.com",
+        edUserId: 202,
+        edUserName: "Grace"
       })
-    ).rejects.toBeInstanceOf(DuplicateEmailError);
-  });
-
-  it("rejects the wrong password", async () => {
-    const { runtime, cleanup } = await createTestRuntime({
-      apiBaseUrl: "http://127.0.0.1:1/api/"
-    });
-    cleanups.push(cleanup);
-
-    await runtime.users.register({
-      email: "ada@example.com",
-      password: "this-is-secure"
-    });
-
-    await expect(
-      runtime.users.authenticate("ada@example.com", "wrong-password")
-    ).rejects.toBeInstanceOf(InvalidCredentialsError);
+    ).toThrow(EdIdentityMismatchError);
   });
 });

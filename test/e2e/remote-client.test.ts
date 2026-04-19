@@ -107,10 +107,7 @@ describe("remote client e2e", () => {
       oauthProvider,
       browser,
       {
-        displayName: "Ada",
-        edToken: "ed-token-a",
-        email: "ada@example.com",
-        password: "this-is-secure"
+        edToken: "ed-token-a"
       }
     );
     cleanups.push(async () => client.close());
@@ -167,10 +164,7 @@ async function connectAuthorizedClient(
   oauthProvider: InMemoryOAuthClientProvider,
   browser: BrowserSession,
   credentials: {
-    displayName: string;
     edToken: string;
-    email: string;
-    password: string;
   }
 ): Promise<Client> {
   const client = new Client({
@@ -208,10 +202,7 @@ async function authorizeOAuthClient(
   browser: BrowserSession,
   authorizationUrl: URL,
   credentials: {
-    displayName: string;
     edToken: string;
-    email: string;
-    password: string;
   }
 ): Promise<URL> {
   const page = await browser.fetch(authorizationUrl, {
@@ -225,11 +216,6 @@ async function authorizeOAuthClient(
   body.set("ed_token", credentials.edToken);
   body.set("scope_read", "1");
   body.set("scope_write", "1");
-  body.set("signup_confirm_password", credentials.password);
-  body.set("signup_display_name", credentials.displayName);
-  body.set("signup_email", credentials.email);
-  body.set("signup_password", credentials.password);
-  body.set("tab", "signup");
 
   const response = await browser.fetch(new URL("/authorize", authorizationUrl), {
     body,

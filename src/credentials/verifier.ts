@@ -1,6 +1,12 @@
 const INVALID_TOKEN_MESSAGE =
   "Invalid or expired Ed API token. Regenerate it at https://edstem.org/settings/api-tokens.";
 
+export interface VerifiedEdIdentity {
+  edUserEmail: string;
+  edUserId: number;
+  edUserName: string;
+}
+
 export class EdTokenInvalidError extends Error {
   constructor(message: string = INVALID_TOKEN_MESSAGE) {
     super(message);
@@ -25,7 +31,7 @@ export class EdApiUpstreamError extends Error {
 export async function verifyEdToken(
   token: string,
   apiBaseUrl: string
-): Promise<{ edUserId: number; edUserName: string }> {
+): Promise<VerifiedEdIdentity> {
   const url = new URL("user", apiBaseUrl);
 
   let response: Response;
@@ -66,6 +72,7 @@ export async function verifyEdToken(
   const user = asRecord(payload.user ?? payload);
   return {
     edUserId: asInt(user.id),
+    edUserEmail: asString(user.email),
     edUserName: asString(user.name)
   };
 }

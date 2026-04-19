@@ -3,7 +3,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
 import { startFakeEdServer } from "../support/fake-ed-server.js";
-import { createTestRuntime, issueAccessToken } from "../support/test-runtime.js";
+import { createTestRuntime, issueAccessToken, upsertTestUser } from "../support/test-runtime.js";
 import { startAppServer } from "../support/start-app-server.js";
 
 describe("mcp integration", () => {
@@ -73,13 +73,15 @@ describe("mcp integration", () => {
     });
     cleanups.push(cleanup);
 
-    const userA = await runtime.users.register({
+    const userA = upsertTestUser(runtime, {
       email: "ada@example.com",
-      password: "this-is-secure"
+      id: 101,
+      name: "Ada"
     });
-    const userB = await runtime.users.register({
+    const userB = upsertTestUser(runtime, {
       email: "grace@example.com",
-      password: "this-is-secure"
+      id: 202,
+      name: "Grace"
     });
     await runtime.credentials.connect(userA.id, "ed-token-a");
     await runtime.credentials.connect(userB.id, "ed-token-b");
@@ -137,9 +139,10 @@ describe("mcp integration", () => {
     });
     cleanups.push(cleanup);
 
-    const user = await runtime.users.register({
+    const user = upsertTestUser(runtime, {
       email: "ada@example.com",
-      password: "this-is-secure"
+      id: 101,
+      name: "Ada"
     });
     await runtime.credentials.connect(user.id, "ed-token-a");
 

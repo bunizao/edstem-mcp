@@ -1,7 +1,7 @@
 import type { AppConfig } from "../config.js";
 import { decryptToken, encryptToken } from "./crypto.js";
 import { CredentialsRepository, type CredentialRecord } from "./repository.js";
-import { verifyEdToken } from "./verifier.js";
+import { verifyEdToken, type VerifiedEdIdentity } from "./verifier.js";
 
 export class EdNotConnectedError extends Error {
   constructor() {
@@ -41,6 +41,19 @@ export class CredentialsService {
     }
 
     const verified = await verifyEdToken(trimmed, this.config.apiBaseUrl);
+    return this.connectVerified(userId, trimmed, verified);
+  }
+
+  connectVerified(
+    userId: number,
+    token: string,
+    verified: VerifiedEdIdentity
+  ): CredentialRecord {
+    const trimmed = token.trim();
+    if (!trimmed) {
+      throw new Error("Ed API token is required.");
+    }
+
     const encrypted = encryptToken(trimmed, this.config.masterKey);
     const lastVerifiedAt = Date.now();
 

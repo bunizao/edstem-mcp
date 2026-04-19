@@ -45,6 +45,8 @@ export async function startFakeEdServer(users: FakeEdUser[]) {
 
   const byToken = new Map(users.map((user) => [user.token, user]));
   const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
     async fetch(request: Request): Promise<Response> {
       const url = new URL(request.url);
       const token = getToken(request.headers.get("authorization"));

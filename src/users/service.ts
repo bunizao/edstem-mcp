@@ -1,26 +1,10 @@
+import type { VerifiedEdIdentity } from "../credentials/verifier.js";
 import { UsersRepository, type UserRecord } from "./repository.js";
 
-const MIN_PASSWORD_LENGTH = 10;
-const BCRYPT_ROUNDS = 12;
-
-export class DuplicateEmailError extends Error {
+export class EdIdentityMismatchError extends Error {
   constructor() {
-    super("An account with that email already exists.");
-    this.name = "DuplicateEmailError";
-  }
-}
-
-export class InvalidCredentialsError extends Error {
-  constructor() {
-    super("Invalid email or password.");
-    this.name = "InvalidCredentialsError";
-  }
-}
-
-export class PasswordPolicyError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "PasswordPolicyError";
+    super("This Ed API token belongs to a different Ed account.");
+    this.name = "EdIdentityMismatchError";
   }
 }
 
@@ -31,24 +15,12 @@ export class UsersService {
     this.repository = repository;
   }
 
-  async authenticate(email: string, password: string): Promise<UserRecord> {
-    const normalizedEmail = normalizeEmail(email);
-    const user = this.repository.getByEmail(normalizedEmail);
-    if (!user) {
-      throw new InvalidCredentialsError();
-    }
-
-    const matches = await Bun.password.verify(password, user.passwordHash);
-    if (!matches) {
-      throw new InvalidCredentialsError();
-    }
-
-    this.repository.touchLastLogin(user.id, Date.now());
-    return this.getById(user.id);
-  }
-
   findByEmail(email: string): UserRecord | null {
     return this.repository.getByEmail(normalizeEmail(email));
+  }
+
+  findByEdUserId(edUserId: number): UserRecord | null {
+    return this.repository.getByEdUserId(edUserId);
   }
 
   getById(userId: number): UserRecord {
@@ -59,37 +31,60 @@ export class UsersService {
     return user;
   }
 
-  async register(input: {
-    displayName?: string;
-    email: string;
-    password: string;
-  }): Promise<UserRecord> {
-    const email = normalizeEmail(input.email);
-    validatePassword(input.password);
+  upsertFromEdIdentity(identity: VerifiedEdIdentity): UserRecord {
+    const now = Date.now();
+    const normalized = normalizeEdIdentity(identity);
 
-    if (this.repository.getByEmail(email)) {
-      throw new DuplicateEmailError();
+    const existing = this.repository.getByEdUserId(identity.edUserId);
+    if (existing) {
+      this.repository.updateIdentity(existing.id, {
+        displayName: normalized.displayName,
+        edUserId: identity.edUserId,
+        email: normalized.email,
+        lastLoginAt: now
+      });
+      return this.getById(existing.id);
     }
 
-    const passwordHash = await Bun.password.hash(input.password, {
-      algorithm: "bcrypt",
-      cost: BCRYPT_ROUNDS
-    });
+    const legacy = this.repository.getByEmail(normalized.email);
+    if (legacy) {
+      this.repository.updateIdentity(legacy.id, {
+        displayName: normalized.displayName,
+        edUserId: identity.edUserId,
+        email: normalized.email,
+        lastLoginAt: now
+      });
+      return this.getById(legacy.id);
+    }
+
     return this.repository.create({
-      createdAt: Date.now(),
-      displayName: normalizeDisplayName(input.displayName),
-      email,
-      passwordHash
+      createdAt: now,
+      displayName: normalized.displayName,
+      edUserId: identity.edUserId,
+      email: normalized.email,
+      lastLoginAt: now
     });
   }
 
-  async resetPassword(userId: number, password: string): Promise<void> {
-    validatePassword(password);
-    const passwordHash = await Bun.password.hash(password, {
-      algorithm: "bcrypt",
-      cost: BCRYPT_ROUNDS
+  syncIdentity(userId: number, identity: VerifiedEdIdentity): UserRecord {
+    const now = Date.now();
+    const current = this.getById(userId);
+    const existing = this.repository.getByEdUserId(identity.edUserId);
+    if (existing && existing.id !== userId) {
+      throw new EdIdentityMismatchError();
+    }
+    if (current.edUserId && current.edUserId !== identity.edUserId) {
+      throw new EdIdentityMismatchError();
+    }
+
+    const normalized = normalizeEdIdentity(identity);
+    this.repository.updateIdentity(userId, {
+      displayName: normalized.displayName,
+      edUserId: identity.edUserId,
+      email: normalized.email,
+      lastLoginAt: now
     });
-    this.repository.setPasswordHash(userId, passwordHash);
+    return this.getById(userId);
   }
 
   deleteAccount(userId: number): void {
@@ -102,14 +97,21 @@ function normalizeDisplayName(value: string | undefined): string | undefined {
   return trimmed || undefined;
 }
 
+function normalizeEdIdentity(identity: VerifiedEdIdentity): {
+  displayName: string;
+  email: string;
+} {
+  const email = normalizeEmail(identity.edUserEmail) || syntheticEmail(identity.edUserId);
+  return {
+    displayName: normalizeDisplayName(identity.edUserName) || email,
+    email
+  };
+}
+
 function normalizeEmail(value: string): string {
   return value.trim().toLowerCase();
 }
 
-function validatePassword(password: string): void {
-  if (password.length < MIN_PASSWORD_LENGTH) {
-    throw new PasswordPolicyError(
-      `Password must be at least ${MIN_PASSWORD_LENGTH} characters long.`
-    );
-  }
+function syntheticEmail(edUserId: number): string {
+  return `ed-${edUserId}@local.invalid`;
 }

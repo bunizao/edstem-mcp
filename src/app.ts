@@ -33,9 +33,15 @@ import {
 import { BunAuthorizeResponse } from "./oauth/http.js";
 import { renderAuthorizePage as renderAuthorizeHtml } from "./oauth/login-page.js";
 import {
+  buildSessionCookie,
   buildExpiredSessionCookie,
+  createSessionForUser,
   readSessionStateFromCookieHeader
 } from "./oauth/session.js";
+import {
+  EdIdentityMismatchError
+} from "./users/service.js";
+import { verifyEdToken } from "./credentials/verifier.js";
 
 const AUTH_RATE_LIMIT = {
   limit: 20,
@@ -57,12 +63,7 @@ const TOKEN_RATE_LIMIT = {
   windowMs: 15 * 60 * 1000
 } as const;
 
-const SIGNIN_ATTEMPT_RATE_LIMIT = {
-  limit: 5,
-  windowMs: 15 * 60 * 1000
-} as const;
-
-const SIGNUP_ATTEMPT_RATE_LIMIT = {
+const AUTHORIZE_ATTEMPT_RATE_LIMIT = {
   limit: 5,
   windowMs: 15 * 60 * 1000
 } as const;
@@ -284,7 +285,6 @@ async function handleAuthorize(
     }
 
     const requestedScopes = parseRequestedScopes(source.scope, runtime.config);
-    const selectedTab = getAuthorizeTab(form?.tab);
     const sessionState = readSessionStateFromCookieHeader(
       request.headers.get("cookie") ?? undefined,
       runtime.config.oauth
@@ -331,8 +331,8 @@ async function handleAuthorize(
     if (
       request.method === "POST" &&
       !rateLimiter.allow(
-        buildAuthorizeAttemptKey(request, form ?? {}, sessionState.session),
-        getAuthorizeAttemptRateLimit(form ?? {})
+        buildAuthorizeAttemptKey(request, sessionState.session),
+        AUTHORIZE_ATTEMPT_RATE_LIMIT
       )
     ) {
       runtime.logger.warn(
@@ -340,8 +340,7 @@ async function handleAuthorize(
           clientId,
           clientIp: context.clientIp,
           event: "oauth.authorize.attempt_throttled",
-          requestId: context.requestId,
-          tab: selectedTab
+          requestId: context.requestId
         },
         "oauth authorize attempt throttled"
       );
@@ -358,7 +357,7 @@ async function handleAuthorize(
         form,
         sessionState,
         request.headers.get("cookie") ?? undefined,
-        getAuthorizeAttemptRateLimit(form ?? {})
+        AUTHORIZE_ATTEMPT_RATE_LIMIT
       );
     }
 
@@ -814,7 +813,16 @@ async function handleSettingsRotate(
   }
 
   try {
-    await runtime.credentials.connect(session.userId, edToken);
+    const verified = await verifyEdToken(edToken, runtime.config.apiBaseUrl);
+    const user = runtime.users.syncIdentity(session.userId, verified);
+    runtime.credentials.connectVerified(user.id, edToken, verified);
+    headers.append(
+      "Set-Cookie",
+      buildSessionCookie(
+        createSessionForUser(user, runtime.config.oauth.sessionTtlSeconds),
+        runtime.config.oauth
+      )
+    );
     runtime.logger.info(
       {
         clientIp: context.clientIp,
@@ -839,7 +847,7 @@ async function handleSettingsRotate(
     return createHtmlResponse(
       renderSettingsPage({
         csrfToken: csrf.token,
-        errorMessage: error instanceof Error ? error.message : String(error),
+        errorMessage: mapEdConnectionError(error),
         session,
         status: runtime.credentials.getConnectionStatus(session.userId)
       }),
@@ -1009,7 +1017,16 @@ async function handleReconnectSubmit(
   }
 
   try {
-    await runtime.credentials.connect(session.userId, edToken);
+    const verified = await verifyEdToken(edToken, runtime.config.apiBaseUrl);
+    const user = runtime.users.syncIdentity(session.userId, verified);
+    runtime.credentials.connectVerified(user.id, edToken, verified);
+    headers.append(
+      "Set-Cookie",
+      buildSessionCookie(
+        createSessionForUser(user, runtime.config.oauth.sessionTtlSeconds),
+        runtime.config.oauth
+      )
+    );
     runtime.logger.info(
       {
         clientIp: context.clientIp,
@@ -1034,7 +1051,7 @@ async function handleReconnectSubmit(
     return createHtmlResponse(
       renderReconnectPage({
         csrfToken: csrf.token,
-        errorMessage: error instanceof Error ? error.message : String(error),
+        errorMessage: mapEdConnectionError(error),
         session,
         status: runtime.credentials.getConnectionStatus(session.userId)
       }),
@@ -1375,28 +1392,15 @@ function parseRequestedScopes(
   return scope?.split(" ").filter(Boolean) || [config.oauth.readScope];
 }
 
-function getAuthorizeTab(value: string | undefined): "signin" | "signup" {
-  return value === "signup" ? "signup" : "signin";
-}
-
-function getAuthorizeAttemptRateLimit(form: Record<string, string>): RateLimitConfig {
-  return getAuthorizeTab(form.tab) === "signup"
-    ? SIGNUP_ATTEMPT_RATE_LIMIT
-    : SIGNIN_ATTEMPT_RATE_LIMIT;
-}
-
 function buildAuthorizeAttemptKey(
   request: Request,
-  form: Record<string, string>,
   session: { email: string; userId: number } | null
 ): string {
-  const tab = getAuthorizeTab(form.tab);
-  if (tab === "signup") {
-    return requestKey(request, "authorize-signup", normalizeRateLimitIdentity(form.signup_email));
-  }
-
-  const identity = form.signin_email || session?.email || String(session?.userId || "");
-  return requestKey(request, "authorize-signin", normalizeRateLimitIdentity(identity));
+  return requestKey(
+    request,
+    "authorize-attempt",
+    normalizeRateLimitIdentity(session ? String(session.userId) : undefined)
+  );
 }
 
 function normalizeRateLimitIdentity(value: string | undefined): string {
@@ -1417,7 +1421,7 @@ function createAuthorizeRateLimitResponse(
   form: Record<string, string> | undefined,
   sessionState: {
     reason: "missing" | "expired" | "invalid" | "valid";
-    session: { displayName: string; email: string } | null;
+    session: { displayName: string; email: string; userId: number } | null;
   },
   cookieHeader: string | undefined,
   rateLimit: RateLimitConfig
@@ -1435,22 +1439,36 @@ function createAuthorizeRateLimitResponse(
     renderAuthorizeHtml(client, {
       csrfToken: csrf.token,
       edTokenHint:
-        sessionState.reason === "valid"
-          ? "Leave this blank if your existing Ed connection is still valid."
+        canReuseAuthorizeSession(runtime, sessionState.session?.userId)
+          ? "Leave this blank to reuse your current browser session."
           : "Paste your Ed API token here.",
       errorMessage: "Too many attempts. Wait a bit and try again.",
       params,
       requestedScopes: params.scopes,
-      selectedTab: getAuthorizeTab(form?.tab),
       session: sessionState.reason === "valid" ? sessionState.session ?? undefined : undefined,
-      showEdToken: sessionState.reason !== "valid",
-      signInEmail: form?.signin_email,
-      signUpDisplayName: form?.signup_display_name,
-      signUpEmail: form?.signup_email
+      showEdToken:
+        sessionState.reason !== "valid" ||
+        !canReuseAuthorizeSession(runtime, sessionState.session?.userId)
     }),
     429,
     headers
   );
+}
+
+function canReuseAuthorizeSession(runtime: Runtime, userId: number | undefined): boolean {
+  if (!userId) {
+    return false;
+  }
+
+  const status = runtime.credentials.getConnectionStatus(userId);
+  return status.connected && !status.isInvalid;
+}
+
+function mapEdConnectionError(error: unknown): string {
+  if (error instanceof EdIdentityMismatchError) {
+    return `${error.message} Start a fresh OAuth sign-in if you want to switch accounts.`;
+  }
+  return error instanceof Error ? error.message : String(error);
 }
 
 function appendSessionCleanupCookies(
