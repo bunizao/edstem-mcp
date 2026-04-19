@@ -1,5 +1,3 @@
-import bcrypt from "bcryptjs";
-
 import { UsersRepository, type UserRecord } from "./repository.js";
 
 const MIN_PASSWORD_LENGTH = 10;
@@ -40,7 +38,7 @@ export class UsersService {
       throw new InvalidCredentialsError();
     }
 
-    const matches = await bcrypt.compare(password, user.passwordHash);
+    const matches = await Bun.password.verify(password, user.passwordHash);
     if (!matches) {
       throw new InvalidCredentialsError();
     }
@@ -73,7 +71,10 @@ export class UsersService {
       throw new DuplicateEmailError();
     }
 
-    const passwordHash = await bcrypt.hash(input.password, BCRYPT_ROUNDS);
+    const passwordHash = await Bun.password.hash(input.password, {
+      algorithm: "bcrypt",
+      cost: BCRYPT_ROUNDS
+    });
     return this.repository.create({
       createdAt: Date.now(),
       displayName: normalizeDisplayName(input.displayName),
@@ -84,7 +85,10 @@ export class UsersService {
 
   async resetPassword(userId: number, password: string): Promise<void> {
     validatePassword(password);
-    const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+    const passwordHash = await Bun.password.hash(password, {
+      algorithm: "bcrypt",
+      cost: BCRYPT_ROUNDS
+    });
     this.repository.setPasswordHash(userId, passwordHash);
   }
 

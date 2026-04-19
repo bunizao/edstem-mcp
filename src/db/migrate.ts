@@ -1,19 +1,11 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 
-const MIGRATIONS_DIR = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "..",
-  "..",
-  "src",
-  "db",
-  "migrations"
-);
+const MIGRATIONS_DIR = resolveMigrationsDir();
 
-export function migrateDatabase(db: Database.Database): void {
+export function migrateDatabase(db: Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
       version INTEGER PRIMARY KEY,
@@ -21,12 +13,10 @@ export function migrateDatabase(db: Database.Database): void {
     );
   `);
 
-  const applied = new Set<number>(
-    db.prepare("SELECT version FROM schema_migrations").all().map((row) => {
-      const value = (row as { version: number }).version;
-      return value;
-    })
-  );
+  const applied = new Set<number>();
+  for (const row of db.query("SELECT version FROM schema_migrations").all() as Array<{ version: number }>) {
+    applied.add(row.version);
+  }
 
   const migrations = readdirSync(MIGRATIONS_DIR)
     .filter((file) => file.endsWith(".sql"))
@@ -41,10 +31,27 @@ export function migrateDatabase(db: Database.Database): void {
     const sql = readFileSync(path.join(MIGRATIONS_DIR, file), "utf-8");
     const apply = db.transaction(() => {
       db.exec(sql);
-      db.prepare(
-        "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)"
-      ).run(version, Date.now());
+      db.query("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)").run(
+        version,
+        Date.now()
+      );
     });
     apply();
   }
+}
+
+function resolveMigrationsDir(): string {
+  const candidates = [
+    path.resolve(import.meta.dir, "migrations"),
+    path.resolve(import.meta.dir, "..", "..", "src", "db", "migrations"),
+    path.resolve(process.cwd(), "src", "db", "migrations")
+  ];
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return candidates[0]!;
 }

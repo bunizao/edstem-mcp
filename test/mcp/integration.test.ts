@@ -1,13 +1,10 @@
-import type { AddressInfo } from "node:net";
-import { once } from "node:events";
-
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
-import { createApp } from "../../src/app.js";
 import { startFakeEdServer } from "../support/fake-ed-server.js";
 import { createTestRuntime, issueAccessToken } from "../support/test-runtime.js";
+import { startAppServer } from "../support/start-app-server.js";
 
 describe("mcp integration", () => {
   const cleanups: Array<() => Promise<void>> = [];
@@ -98,16 +95,9 @@ describe("mcp integration", () => {
       username: userB.email
     });
 
-    const server = createApp(runtime).listen(0);
-    await once(server, "listening");
-    cleanups.push(
-      () =>
-        new Promise<void>((resolve, reject) => {
-          server.close((error) => (error ? reject(error) : resolve()));
-        })
-    );
-    const address = server.address() as AddressInfo;
-    const baseUrl = `http://127.0.0.1:${address.port}`;
+    const server = await startAppServer(runtime);
+    cleanups.push(async () => server.close());
+    const baseUrl = server.baseUrl;
 
     const coursesA = await callTool(baseUrl, tokenA, "list_courses", {
       includeArchived: false
@@ -164,16 +154,9 @@ describe("mcp integration", () => {
       username: user.email
     });
 
-    const server = createApp(runtime).listen(0);
-    await once(server, "listening");
-    cleanups.push(
-      () =>
-        new Promise<void>((resolve, reject) => {
-          server.close((error) => (error ? reject(error) : resolve()));
-        })
-    );
-    const address = server.address() as AddressInfo;
-    const baseUrl = `http://127.0.0.1:${address.port}`;
+    const server = await startAppServer(runtime);
+    cleanups.push(async () => server.close());
+    const baseUrl = server.baseUrl;
 
     const denied = await callTool(baseUrl, readToken, "submit_slide_answer", {
       choices: [2],

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 
 import { serializeLesson, serializeThread } from "../src/ed/serialization.js";
 import type { Lesson, Thread } from "../src/ed/models.js";

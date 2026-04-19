@@ -1,7 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
 
-import type { Response } from "express";
-
 import {
   checkResourceAllowed,
   resourceUrlFromServerUrl
@@ -20,7 +18,6 @@ import {
 import type { OAuthRegisteredClientsStore } from "@modelcontextprotocol/sdk/server/auth/clients.js";
 import type {
   AuthorizationParams,
-  OAuthServerProvider
 } from "@modelcontextprotocol/sdk/server/auth/provider.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 
@@ -29,6 +26,7 @@ import { CredentialsService, EdNotConnectedError, EdReconnectRequiredError } fro
 import { EdApiBaseUrlError, EdTokenInvalidError } from "../credentials/verifier.js";
 import { UsersService, DuplicateEmailError, InvalidCredentialsError, PasswordPolicyError } from "../users/service.js";
 import { renderAuthorizePage as renderAuthorizeHtml } from "./login-page.js";
+import type { AuthorizeResponse } from "./http.js";
 import {
   buildSessionCookie,
   createSessionForUser,
@@ -55,13 +53,20 @@ export class SqlOAuthClientsStore implements OAuthRegisteredClientsStore {
     return this.store.getClient(clientId);
   }
 
-  async registerClient(client: OAuthClientInformationFull): Promise<OAuthClientInformationFull> {
-    this.store.saveClient(client);
-    return client;
+  async registerClient(
+    client: Omit<OAuthClientInformationFull, "client_id" | "client_id_issued_at">
+  ): Promise<OAuthClientInformationFull> {
+    const registeredClient: OAuthClientInformationFull = {
+      ...client,
+      client_id: randomUUID(),
+      client_id_issued_at: Math.floor(Date.now() / 1000)
+    };
+    this.store.saveClient(registeredClient);
+    return registeredClient;
   }
 }
 
-export class EdstemOAuthProvider implements OAuthServerProvider {
+export class EdstemOAuthProvider {
   readonly clientsStore: OAuthRegisteredClientsStore;
   readonly skipLocalPkceValidation = false;
   private readonly config: OAuthConfig;
@@ -87,7 +92,7 @@ export class EdstemOAuthProvider implements OAuthServerProvider {
   async authorize(
     client: OAuthClientInformationFull,
     params: AuthorizationParams,
-    res: Response
+    res: AuthorizeResponse
   ): Promise<void> {
     const request = res.req;
     const session = readSessionFromCookieHeader(request.headers.cookie, this.config);
@@ -300,7 +305,7 @@ export class EdstemOAuthProvider implements OAuthServerProvider {
       userId: number;
     },
     scopes: string[],
-    res: Response
+    res: AuthorizeResponse
   ): Promise<void> {
     const code = randomUUID();
     const resource = this.resolveResource(params.resource);

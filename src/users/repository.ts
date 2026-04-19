@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 
 export interface UserRecord {
   createdAt: number;
@@ -19,9 +19,9 @@ type UserRow = {
 };
 
 export class UsersRepository {
-  private readonly db: Database.Database;
+  private readonly db: Database;
 
-  constructor(db: Database.Database) {
+  constructor(db: Database) {
     this.db = db;
   }
 
@@ -32,29 +32,29 @@ export class UsersRepository {
     passwordHash: string;
   }): UserRecord {
     const result = this.db
-      .prepare(
+      .query(
         `
           INSERT INTO users (email, password_hash, display_name, created_at)
-          VALUES (@email, @passwordHash, @displayName, @createdAt)
+          VALUES (?, ?, ?, ?)
         `
       )
-      .run({
-        createdAt: input.createdAt,
-        displayName: input.displayName ?? null,
-        email: input.email,
-        passwordHash: input.passwordHash
-      });
+      .run(
+        input.email,
+        input.passwordHash,
+        input.displayName ?? null,
+        input.createdAt
+      );
 
     return this.getById(Number(result.lastInsertRowid)) as UserRecord;
   }
 
   delete(userId: number): void {
-    this.db.prepare("DELETE FROM users WHERE id = ?").run(userId);
+    this.db.query("DELETE FROM users WHERE id = ?").run(userId);
   }
 
   getByEmail(email: string): UserRecord | null {
     const row = this.db
-      .prepare(
+      .query(
         `
           SELECT id, email, password_hash, display_name, created_at, last_login_at
           FROM users
@@ -68,7 +68,7 @@ export class UsersRepository {
 
   getById(userId: number): UserRecord | null {
     const row = this.db
-      .prepare(
+      .query(
         `
           SELECT id, email, password_hash, display_name, created_at, last_login_at
           FROM users
@@ -81,15 +81,11 @@ export class UsersRepository {
   }
 
   setPasswordHash(userId: number, passwordHash: string): void {
-    this.db
-      .prepare("UPDATE users SET password_hash = ? WHERE id = ?")
-      .run(passwordHash, userId);
+    this.db.query("UPDATE users SET password_hash = ? WHERE id = ?").run(passwordHash, userId);
   }
 
   touchLastLogin(userId: number, timestamp: number): void {
-    this.db
-      .prepare("UPDATE users SET last_login_at = ? WHERE id = ?")
-      .run(timestamp, userId);
+    this.db.query("UPDATE users SET last_login_at = ? WHERE id = ?").run(timestamp, userId);
   }
 }
 

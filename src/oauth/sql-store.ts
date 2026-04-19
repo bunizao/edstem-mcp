@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 
 import type { OAuthClientInformationFull } from "@modelcontextprotocol/sdk/shared/auth.js";
 
@@ -79,29 +79,27 @@ type ClientRow = {
 };
 
 export class SqlOAuthStore {
-  private readonly db: Database.Database;
+  private readonly db: Database;
 
-  constructor(db: Database.Database) {
+  constructor(db: Database) {
     this.db = db;
   }
 
   deleteAccessToken(token: string): void {
-    this.db.prepare("DELETE FROM oauth_access_tokens WHERE token = ?").run(token);
+    this.db.query("DELETE FROM oauth_access_tokens WHERE token = ?").run(token);
   }
 
   deleteAuthorizationCode(code: string): void {
-    this.db
-      .prepare("DELETE FROM oauth_authorization_codes WHERE code = ?")
-      .run(code);
+    this.db.query("DELETE FROM oauth_authorization_codes WHERE code = ?").run(code);
   }
 
   deleteRefreshToken(token: string): void {
-    this.db.prepare("DELETE FROM oauth_refresh_tokens WHERE token = ?").run(token);
+    this.db.query("DELETE FROM oauth_refresh_tokens WHERE token = ?").run(token);
   }
 
   getAccessToken(token: string): AccessTokenRecord | undefined {
     const row = this.db
-      .prepare(
+      .query(
         `
           SELECT client_id, display_name, expires_at, issued_at, refresh_token,
                  resource, scopes, user_id, username
@@ -116,7 +114,7 @@ export class SqlOAuthStore {
 
   getAuthorizationCode(code: string): AuthorizationCodeRecord | undefined {
     const row = this.db
-      .prepare(
+      .query(
         `
           SELECT client_id, code_challenge, display_name, expires_at, issued_at,
                  redirect_uri, resource, scopes, user_id, username
@@ -131,7 +129,7 @@ export class SqlOAuthStore {
 
   getClient(clientId: string): OAuthClientInformationFull | undefined {
     const row = this.db
-      .prepare("SELECT client_data FROM oauth_clients WHERE client_id = ?")
+      .query("SELECT client_data FROM oauth_clients WHERE client_id = ?")
       .get(clientId) as ClientRow | undefined;
 
     if (!row) {
@@ -143,7 +141,7 @@ export class SqlOAuthStore {
 
   getRefreshToken(token: string): RefreshTokenRecord | undefined {
     const row = this.db
-      .prepare(
+      .query(
         `
           SELECT client_id, display_name, expires_at, issued_at, resource, scopes,
                  user_id, username
@@ -157,115 +155,109 @@ export class SqlOAuthStore {
   }
 
   pruneExpired(now: number = Date.now()): void {
-    this.db.prepare("DELETE FROM oauth_access_tokens WHERE expires_at <= ?").run(now);
-    this.db.prepare("DELETE FROM oauth_refresh_tokens WHERE expires_at <= ?").run(now);
-    this.db
-      .prepare("DELETE FROM oauth_authorization_codes WHERE expires_at <= ?")
-      .run(now);
+    this.db.query("DELETE FROM oauth_access_tokens WHERE expires_at <= ?").run(now);
+    this.db.query("DELETE FROM oauth_refresh_tokens WHERE expires_at <= ?").run(now);
+    this.db.query("DELETE FROM oauth_authorization_codes WHERE expires_at <= ?").run(now);
   }
 
   saveAccessToken(token: string, record: AccessTokenRecord): void {
     this.db
-      .prepare(
+      .query(
         `
           INSERT INTO oauth_access_tokens (
             token, client_id, user_id, display_name, username, resource,
             scopes, refresh_token, expires_at, created_at, issued_at
           )
           VALUES (
-            @token, @clientId, @userId, @displayName, @username, @resource,
-            @scopes, @refreshToken, @expiresAt, @createdAt, @issuedAt
+            ?, ?, ?, ?, ?, ?,
+            ?, ?, ?, ?, ?
           )
         `
       )
-      .run({
-        clientId: record.clientId,
-        createdAt: Date.now(),
-        displayName: record.displayName,
-        expiresAt: record.expiresAt,
-        issuedAt: record.issuedAt,
-        refreshToken: record.refreshToken ?? null,
-        resource: record.resource ?? null,
-        scopes: JSON.stringify(record.scopes),
+      .run(
         token,
-        userId: record.userId,
-        username: record.username
-      });
+        record.clientId,
+        record.userId,
+        record.displayName,
+        record.username,
+        record.resource ?? null,
+        JSON.stringify(record.scopes),
+        record.refreshToken ?? null,
+        record.expiresAt,
+        Date.now(),
+        record.issuedAt
+      );
   }
 
   saveAuthorizationCode(code: string, record: AuthorizationCodeRecord): void {
     this.db
-      .prepare(
+      .query(
         `
           INSERT INTO oauth_authorization_codes (
             code, client_id, user_id, redirect_uri, code_challenge, scopes,
             resource, display_name, username, expires_at, created_at, issued_at
           )
           VALUES (
-            @code, @clientId, @userId, @redirectUri, @codeChallenge, @scopes,
-            @resource, @displayName, @username, @expiresAt, @createdAt, @issuedAt
+            ?, ?, ?, ?, ?, ?,
+            ?, ?, ?, ?, ?, ?
           )
         `
       )
-      .run({
-        clientId: record.clientId,
+      .run(
         code,
-        codeChallenge: record.codeChallenge,
-        createdAt: Date.now(),
-        displayName: record.displayName,
-        expiresAt: record.expiresAt,
-        issuedAt: record.issuedAt,
-        redirectUri: record.redirectUri,
-        resource: record.resource ?? null,
-        scopes: JSON.stringify(record.scopes),
-        userId: record.userId,
-        username: record.username
-      });
+        record.clientId,
+        record.userId,
+        record.redirectUri,
+        record.codeChallenge,
+        JSON.stringify(record.scopes),
+        record.resource ?? null,
+        record.displayName,
+        record.username,
+        record.expiresAt,
+        Date.now(),
+        record.issuedAt
+      );
   }
 
   saveClient(client: OAuthClientInformationFull): void {
     this.db
-      .prepare(
+      .query(
         `
           INSERT INTO oauth_clients (client_id, client_data, created_at)
-          VALUES (@clientId, @clientData, @createdAt)
+          VALUES (?, ?, ?)
           ON CONFLICT(client_id) DO UPDATE SET
             client_data = excluded.client_data
         `
       )
-      .run({
-        clientData: JSON.stringify(client),
-        clientId: client.client_id,
-        createdAt: Date.now()
-      });
+      .run(client.client_id, JSON.stringify(client), Date.now());
   }
 
   saveRefreshToken(token: string, record: RefreshTokenRecord): void {
     this.db
-      .prepare(
+      .query(
         `
           INSERT INTO oauth_refresh_tokens (
             token, client_id, user_id, display_name, username, resource,
             scopes, expires_at, created_at, issued_at
           )
           VALUES (
-            @token, @clientId, @userId, @displayName, @username, @resource,
-            @scopes, @expiresAt, @createdAt, @issuedAt
+            ?, ?, ?, ?, ?, ?,
+            ?, ?, ?, ?
           )
         `
       )
-      .run({
-        clientId: record.clientId,
-        createdAt: Date.now(),
-        displayName: record.displayName,
-        expiresAt: record.expiresAt,
-        issuedAt: record.issuedAt,
-        resource: record.resource ?? null,
-        scopes: JSON.stringify(record.scopes),
+      .run(
         token,
-        userId: record.userId,
-        username: record.username
-      });
+        record.clientId,
+        record.userId,
+        record.displayName,
+        record.username,
+        record.resource ?? null,
+        JSON.stringify(record.scopes),
+        record.expiresAt,
+        Date.now(),
+        record.issuedAt
+      );
   }
 }
 

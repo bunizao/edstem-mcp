@@ -1,6 +1,34 @@
 # edstem-mcp
 
-Remote MCP server for Ed Discussion with per-user OAuth, encrypted Ed tokens, and read/write tools.
+Bun-native remote MCP server for Ed Discussion with per-user OAuth, encrypted Ed tokens, and read/write tools.
+
+## Requirements
+
+- Bun 1.3+
+- `MASTER_KEY` as a 32-byte base64 string
+
+## Scripts
+
+```bash
+bun install
+bun run dev
+bun run test
+bun run check
+bun run build
+bun run admin -- reset-password <email> [new-password]
+```
+
+## Environment
+
+- `MASTER_KEY`: required, 32-byte base64 key for Ed token encryption
+- `DATABASE_PATH`: optional, defaults to `.data/edstem-mcp.db`
+- `PUBLIC_BASE_URL`: optional, defaults to `http://localhost:${PORT}`
+- `PORT`: optional, defaults to `8787`
+- `MCP_PATH`: optional, defaults to `/mcp`
+- `ED_API_BASE_URL`: optional, defaults to `https://edstem.org/api/`
+- `ED_API_TOKEN`: optional Bun-local fallback for development only
+- `OAUTH_ACCESS_TOKEN_TTL_SECONDS`: optional, defaults to `3600`
+- `OAUTH_REFRESH_TOKEN_TTL_SECONDS`: optional, defaults to `2592000`
 
 ## Tools
 
@@ -17,33 +45,17 @@ Remote MCP server for Ed Discussion with per-user OAuth, encrypted Ed tokens, an
 - `submit_slide_answer`
 - `submit_slide`
 
-## Setup
+## Local Run
 
 ```bash
-npm install
 export MASTER_KEY="$(openssl rand -base64 32)"
-npm run dev
+bun run start
 ```
 
-## Environment
+Health endpoints:
 
-- `MASTER_KEY`: required, 32-byte base64 key for Ed token encryption
-- `DATABASE_PATH`: optional, defaults to `.data/edstem-mcp.db`
-- `PUBLIC_BASE_URL`: optional, defaults to `http://localhost:${PORT}`
-- `PORT`: optional, defaults to `8787`
-- `MCP_PATH`: optional, defaults to `/mcp`
-- `ED_API_BASE_URL`: optional, defaults to `https://edstem.org/api/`
-- `ED_API_TOKEN`: optional dev fallback
-- `OAUTH_ACCESS_TOKEN_TTL_SECONDS`: optional, defaults to `3600`
-- `OAUTH_REFRESH_TOKEN_TTL_SECONDS`: optional, defaults to `2592000`
-
-## Scripts
-
-- `npm run dev`
-- `npm run build`
-- `npm run check`
-- `npm test`
-- `npm run admin -- reset-password <email> [new-password]`
+- `/healthz`
+- `/readyz`
 
 ## Docker
 
@@ -53,4 +65,4 @@ MASTER_KEY="$(openssl rand -base64 32)" DOMAIN=your.host docker compose up -d --
 
 ## Backup
 
-Copy the SQLite file at `DATABASE_PATH`. For a clean snapshot, stop the app and copy the file, or use `sqlite3 .backup` against the database.
+Copy the SQLite file at `DATABASE_PATH`. For a clean snapshot, stop the app first or use `sqlite3 .backup`.

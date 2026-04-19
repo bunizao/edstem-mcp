@@ -1,314 +1,950 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 
-import express from "express";
 import {
-  getOAuthProtectedResourceMetadataUrl,
-  mcpAuthRouter
+  createOAuthMetadata,
+  getOAuthProtectedResourceMetadataUrl
 } from "@modelcontextprotocol/sdk/server/auth/router.js";
-import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { rateLimit } from "express-rate-limit";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import type { OAuthServerProvider } from "@modelcontextprotocol/sdk/server/auth/provider.js";
+import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
+import {
+  InvalidClientError,
+  InvalidClientMetadataError,
+  InvalidGrantError,
+  InvalidRequestError,
+  OAuthError,
+  ServerError,
+  UnsupportedGrantTypeError
+} from "@modelcontextprotocol/sdk/server/auth/errors.js";
+import {
+  OAuthClientMetadataSchema,
+  type OAuthClientInformationFull
+} from "@modelcontextprotocol/sdk/shared/auth.js";
 
 import { createServer } from "./mcp/server.js";
 import type { Runtime } from "./runtime.js";
 import {
-  buildExpiredCsrfCookie,
   buildCsrfCookie,
+  buildExpiredCsrfCookie,
   ensureCsrfToken,
   validateCsrfToken
 } from "./oauth/csrf.js";
+import { BunAuthorizeResponse } from "./oauth/http.js";
 import {
   buildExpiredSessionCookie,
   readSessionFromCookieHeader
 } from "./oauth/session.js";
 
-const authPageLimiter = rateLimit({
+const AUTH_RATE_LIMIT = {
   limit: 20,
-  standardHeaders: true,
   windowMs: 15 * 60 * 1000
-});
+} as const;
 
-export function createApp(runtime: Runtime): express.Express {
-  const { config, credentials, oauthProvider, users, logger } = runtime;
-  const app = express();
+const CLIENT_REGISTRATION_RATE_LIMIT = {
+  limit: 20,
+  windowMs: 60 * 60 * 1000
+} as const;
 
-  app.set("trust proxy", 1);
-  app.use(express.json({ limit: "1mb" }));
-  app.use(express.urlencoded({ extended: false }));
-  app.use(requestLogger(logger));
+const MCP_RATE_LIMIT = {
+  limit: 60,
+  windowMs: 60 * 1000
+} as const;
 
-  if (config.oauth.enabled) {
-    app.use(
-      mcpAuthRouter({
-        issuerUrl: config.oauth.issuerUrl,
-        provider: oauthProvider,
-        resourceName: "EdStem MCP",
-        resourceServerUrl: config.oauth.mcpServerUrl,
-        scopesSupported: config.oauth.supportedScopes
+const TOKEN_RATE_LIMIT = {
+  limit: 50,
+  windowMs: 15 * 60 * 1000
+} as const;
+
+export interface BunApp {
+  fetch(request: Request): Promise<Response>;
+}
+
+export function createApp(runtime: Runtime): BunApp {
+  const authMetadataPath = "/.well-known/oauth-authorization-server";
+  const protectedResourceMetadataPath = new URL(
+    getOAuthProtectedResourceMetadataUrl(runtime.config.oauth.mcpServerUrl)
+  ).pathname;
+  const rateLimiter = createRateLimiter();
+  const oauthMetadata = runtime.config.oauth.enabled
+    ? createOAuthMetadata({
+        issuerUrl: runtime.config.oauth.issuerUrl,
+        provider: runtime.oauthProvider as unknown as OAuthServerProvider,
+        scopesSupported: runtime.config.oauth.supportedScopes
       })
-    );
-  }
+    : null;
 
-  app.get("/healthz", (_request, response) => {
-    response.json({ ok: true, service: "edstem-mcp" });
-  });
-
-  app.get("/readyz", (_request, response) => {
-    response.json({
-      db: true,
-      key: Boolean(config.masterKey.length === 32),
-      ok: true
-    });
-  });
-
-  app.get("/settings", authPageLimiter, (request, response) => {
-    const session = readSessionFromCookieHeader(request.headers.cookie, config.oauth);
-    const csrf = ensureCsrfToken(request.headers.cookie);
-    if (csrf.cookie) {
-      response.setHeader("Set-Cookie", buildCsrfCookie(config.oauth, csrf.cookie));
-    }
-
-    if (!session) {
-      response.status(401).type("html").send(renderSessionRequiredPage("settings"));
-      return;
-    }
-
-    const status = credentials.getConnectionStatus(session.userId);
-    response.type("html").send(
-      renderSettingsPage({
-        csrfToken: csrf.token,
-        session,
-        status
-      })
-    );
-  });
-
-  app.post("/settings/rotate", authPageLimiter, async (request, response) => {
-    const session = readSessionFromCookieHeader(request.headers.cookie, config.oauth);
-    const csrf = ensureCsrfToken(request.headers.cookie);
-    if (csrf.cookie) {
-      response.setHeader("Set-Cookie", buildCsrfCookie(config.oauth, csrf.cookie));
-    }
-
-    if (!session) {
-      response.status(401).type("html").send(renderSessionRequiredPage("settings"));
-      return;
-    }
-    if (!validateCsrfToken(request.headers.cookie, getFormField(request.body.csrf_token))) {
-      response.status(403).type("html").send(renderSettingsPage({
-        csrfToken: csrf.token,
-        errorMessage: "Your session expired. Reload the page and try again.",
-        session,
-        status: credentials.getConnectionStatus(session.userId)
-      }));
-      return;
-    }
-
-    const edToken = getFormField(request.body.ed_token);
-    if (!edToken) {
-      response.status(422).type("html").send(
-        renderSettingsPage({
-          csrfToken: csrf.token,
-          errorMessage: "Ed API token is required.",
-          session,
-          status: credentials.getConnectionStatus(session.userId)
-        })
-      );
-      return;
-    }
-
-    try {
-      await credentials.connect(session.userId, edToken);
-      response.redirect("/settings");
-    } catch (error) {
-      response.status(422).type("html").send(
-        renderSettingsPage({
-          csrfToken: csrf.token,
-          errorMessage: error instanceof Error ? error.message : String(error),
-          session,
-          status: credentials.getConnectionStatus(session.userId)
-        })
-      );
-    }
-  });
-
-  app.post("/settings/delete", authPageLimiter, (request, response) => {
-    const session = readSessionFromCookieHeader(request.headers.cookie, config.oauth);
-    const csrf = ensureCsrfToken(request.headers.cookie);
-    if (csrf.cookie) {
-      response.setHeader("Set-Cookie", buildCsrfCookie(config.oauth, csrf.cookie));
-    }
-
-    if (!session) {
-      response.status(401).type("html").send(renderSessionRequiredPage("settings"));
-      return;
-    }
-    if (!validateCsrfToken(request.headers.cookie, getFormField(request.body.csrf_token))) {
-      response.status(403).type("html").send(renderSettingsPage({
-        csrfToken: csrf.token,
-        errorMessage: "Your session expired. Reload the page and try again.",
-        session,
-        status: credentials.getConnectionStatus(session.userId)
-      }));
-      return;
-    }
-
-    credentials.delete(session.userId);
-    users.deleteAccount(session.userId);
-    response
-      .setHeader("Set-Cookie", [
-        buildExpiredSessionCookie(config.oauth),
-        buildExpiredCsrfCookie(config.oauth)
-      ])
-      .type("html")
-      .send(renderDeletedPage());
-  });
-
-  app.get("/reconnect", authPageLimiter, (request, response) => {
-    const session = readSessionFromCookieHeader(request.headers.cookie, config.oauth);
-    const csrf = ensureCsrfToken(request.headers.cookie);
-    if (csrf.cookie) {
-      response.setHeader("Set-Cookie", buildCsrfCookie(config.oauth, csrf.cookie));
-    }
-
-    if (!session) {
-      response.status(401).type("html").send(renderSessionRequiredPage("reconnect"));
-      return;
-    }
-
-    const status = credentials.getConnectionStatus(session.userId);
-    response.type("html").send(
-      renderReconnectPage({
-        csrfToken: csrf.token,
-        session,
-        status
-      })
-    );
-  });
-
-  app.post("/reconnect", authPageLimiter, async (request, response) => {
-    const session = readSessionFromCookieHeader(request.headers.cookie, config.oauth);
-    const csrf = ensureCsrfToken(request.headers.cookie);
-    if (csrf.cookie) {
-      response.setHeader("Set-Cookie", buildCsrfCookie(config.oauth, csrf.cookie));
-    }
-
-    if (!session) {
-      response.status(401).type("html").send(renderSessionRequiredPage("reconnect"));
-      return;
-    }
-    if (!validateCsrfToken(request.headers.cookie, getFormField(request.body.csrf_token))) {
-      response.status(403).type("html").send(renderReconnectPage({
-        csrfToken: csrf.token,
-        errorMessage: "Your session expired. Reload the page and try again.",
-        session,
-        status: credentials.getConnectionStatus(session.userId)
-      }));
-      return;
-    }
-
-    const edToken = getFormField(request.body.ed_token);
-    if (!edToken) {
-      response.status(422).type("html").send(
-        renderReconnectPage({
-          csrfToken: csrf.token,
-          errorMessage: "Ed API token is required.",
-          session,
-          status: credentials.getConnectionStatus(session.userId)
-        })
-      );
-      return;
-    }
-
-    try {
-      await credentials.connect(session.userId, edToken);
-      response.redirect("/settings");
-    } catch (error) {
-      response.status(422).type("html").send(
-        renderReconnectPage({
-          csrfToken: csrf.token,
-          errorMessage: error instanceof Error ? error.message : String(error),
-          session,
-          status: credentials.getConnectionStatus(session.userId)
-        })
-      );
-    }
-  });
-
-  const mcpLimiter = rateLimit({
-    keyGenerator: (request) => String(request.auth?.extra?.userId ?? request.ip),
-    limit: 60,
-    standardHeaders: true,
-    windowMs: 60 * 1000
-  });
-
-  app.all(
-    config.mcpPath,
-    config.oauth.enabled
-      ? requireBearerAuth({
-          requiredScopes: [config.oauth.readScope],
-          resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(config.oauth.mcpServerUrl),
-          verifier: oauthProvider
-        })
-      : (_request, _response, next) => next(),
-    mcpLimiter,
-    async (request, response) => {
-      const server = createServer(config, credentials);
-      const transport = new StreamableHTTPServerTransport({
-        enableJsonResponse: true,
-        sessionIdGenerator: undefined
-      });
+  return {
+    async fetch(request: Request): Promise<Response> {
+      const startedAt = Date.now();
+      let response: Response;
 
       try {
-        await server.connect(transport);
-        await transport.handleRequest(request, response, request.body);
-        response.on("close", () => {
-          void transport.close();
-          void server.close();
-        });
+        response = await routeRequest(
+          runtime,
+          request,
+          rateLimiter,
+          authMetadataPath,
+          protectedResourceMetadataPath,
+          oauthMetadata
+        );
       } catch (error) {
-        if (!response.headersSent) {
-          response.status(500).json({
+        runtime.logger.error(
+          {
+            error: serializeError(error),
+            method: request.method,
+            url: request.url
+          },
+          "request failed"
+        );
+        response = createJsonResponse(
+          {
             error: {
               message: error instanceof Error ? error.message : String(error)
-            },
-            id: null,
-            jsonrpc: "2.0"
-          });
-        }
+            }
+          },
+          500
+        );
       }
+
+      runtime.logger.info(
+        {
+          durationMs: Date.now() - startedAt,
+          method: request.method,
+          requestId: randomUUID(),
+          statusCode: response.status,
+          url: request.url
+        },
+        "request complete"
+      );
+
+      return response;
     }
-  );
-
-  return app;
-}
-
-function getFormField(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function requestLogger(logger: Runtime["logger"]) {
-  return (request: express.Request, response: express.Response, next: express.NextFunction) => {
-    const requestId = randomUUID();
-    const startedAt = Date.now();
-    response.setHeader("x-request-id", requestId);
-    response.on("finish", () => {
-      logger.info({
-        durationMs: Date.now() - startedAt,
-        method: request.method,
-        requestId,
-        statusCode: response.statusCode,
-        url: request.originalUrl,
-        userId: getUserId(request)
-      });
-    });
-    next();
   };
 }
 
-function getUserId(request: express.Request): number | undefined {
-  const userId = request.auth?.extra?.userId;
-  return typeof userId === "number" ? userId : undefined;
+async function routeRequest(
+  runtime: Runtime,
+  request: Request,
+  rateLimiter: RateLimiter,
+  authMetadataPath: string,
+  protectedResourceMetadataPath: string,
+  oauthMetadata: Record<string, unknown> | null
+): Promise<Response> {
+  const url = new URL(request.url);
+  const pathname = url.pathname;
+
+  if (request.method === "OPTIONS" && isCorsPath(pathname, runtime)) {
+    return createCorsPreflightResponse();
+  }
+
+  if (pathname === "/healthz" && request.method === "GET") {
+    return createJsonResponse({ ok: true, service: "edstem-mcp" });
+  }
+
+  if (pathname === "/readyz" && request.method === "GET") {
+    return createJsonResponse({
+      db: true,
+      key: runtime.config.masterKey.length === 32,
+      ok: true
+    });
+  }
+
+  if (runtime.config.oauth.enabled) {
+    if (pathname === authMetadataPath && request.method === "GET" && oauthMetadata) {
+      return createJsonResponse(oauthMetadata, 200, corsHeaders());
+    }
+
+    if (pathname === protectedResourceMetadataPath && request.method === "GET") {
+      return createJsonResponse(
+        {
+          authorization_servers: [runtime.config.oauth.issuerUrl.href],
+          bearer_methods_supported: ["header"],
+          resource: runtime.config.oauth.mcpServerUrl.href,
+          resource_name: "EdStem MCP",
+          scopes_supported: runtime.config.oauth.supportedScopes
+        },
+        200,
+        corsHeaders()
+      );
+    }
+
+    if (pathname === "/register") {
+      return handleClientRegistration(runtime, request, rateLimiter);
+    }
+
+    if (pathname === "/token") {
+      return handleToken(runtime, request, rateLimiter);
+    }
+
+    if (pathname === "/revoke") {
+      return handleRevoke(runtime, request, rateLimiter);
+    }
+
+    if (pathname === "/authorize") {
+      return handleAuthorize(runtime, request, rateLimiter);
+    }
+  }
+
+  if (pathname === "/settings" && request.method === "GET") {
+    return handleSettings(runtime, request);
+  }
+
+  if (pathname === "/settings/rotate" && request.method === "POST") {
+    return handleSettingsRotate(runtime, request);
+  }
+
+  if (pathname === "/settings/delete" && request.method === "POST") {
+    return handleSettingsDelete(runtime, request);
+  }
+
+  if (pathname === "/reconnect" && request.method === "GET") {
+    return handleReconnect(runtime, request);
+  }
+
+  if (pathname === "/reconnect" && request.method === "POST") {
+    return handleReconnectSubmit(runtime, request);
+  }
+
+  if (pathname === runtime.config.mcpPath) {
+    return handleMcp(runtime, request, rateLimiter);
+  }
+
+  return new Response("Not found", { status: 404 });
+}
+
+async function handleAuthorize(
+  runtime: Runtime,
+  request: Request,
+  rateLimiter: RateLimiter
+): Promise<Response> {
+  if (request.method !== "GET" && request.method !== "POST") {
+    return createOAuthErrorResponse(new InvalidRequestError("Method not allowed"), 405);
+  }
+
+  if (!rateLimiter.allow(requestKey(request, "authorize"), AUTH_RATE_LIMIT)) {
+    return createOAuthErrorResponse(new InvalidRequestError("Rate limit exceeded"), 429);
+  }
+
+  const form = request.method === "POST" ? await parseFormBody(request) : undefined;
+  const source =
+    request.method === "POST"
+      ? (form ?? {})
+      : Object.fromEntries(new URL(request.url).searchParams.entries());
+
+  try {
+    const clientId = requiredField(source.client_id, "client_id");
+    const responseType = requiredField(source.response_type, "response_type");
+    const codeChallenge = requiredField(source.code_challenge, "code_challenge");
+    const codeChallengeMethod = requiredField(
+      source.code_challenge_method,
+      "code_challenge_method"
+    );
+
+    if (responseType !== "code") {
+      throw new InvalidRequestError("response_type must be code");
+    }
+    if (codeChallengeMethod !== "S256") {
+      throw new InvalidRequestError("code_challenge_method must be S256");
+    }
+
+    const client = await runtime.oauthProvider.clientsStore.getClient(clientId);
+    if (!client) {
+      throw new InvalidClientError("Invalid client_id");
+    }
+
+    const redirectUri = resolveRedirectUri(client, source.redirect_uri);
+    const response = new BunAuthorizeResponse({
+      body: form,
+      headers: {
+        cookie: request.headers.get("cookie") ?? undefined
+      },
+      method: request.method
+    });
+
+    await runtime.oauthProvider.authorize(
+      client,
+      {
+        codeChallenge,
+        redirectUri,
+        resource: source.resource ? new URL(source.resource) : undefined,
+        scopes: source.scope ? source.scope.split(" ").filter(Boolean) : undefined,
+        state: source.state
+      },
+      response
+    );
+
+    return response.toResponse();
+  } catch (error) {
+    if (error instanceof OAuthError) {
+      return createOAuthErrorResponse(error);
+    }
+    const serverError = new ServerError(error instanceof Error ? error.message : String(error));
+    return createOAuthErrorResponse(serverError, 500);
+  }
+}
+
+async function handleClientRegistration(
+  runtime: Runtime,
+  request: Request,
+  rateLimiter: RateLimiter
+): Promise<Response> {
+  if (request.method !== "POST") {
+    return createOAuthErrorResponse(new InvalidRequestError("Method not allowed"), 405, corsHeaders());
+  }
+
+  if (!rateLimiter.allow(requestKey(request, "register"), CLIENT_REGISTRATION_RATE_LIMIT)) {
+    return createOAuthErrorResponse(new InvalidRequestError("Rate limit exceeded"), 429, corsHeaders());
+  }
+
+  try {
+    const body = (await request.json()) as unknown;
+    const parsed = OAuthClientMetadataSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new InvalidClientMetadataError(parsed.error.message);
+    }
+
+    const metadata = parsed.data;
+    const isPublicClient = metadata.token_endpoint_auth_method === "none";
+    const issuedAt = Math.floor(Date.now() / 1000);
+    const registerClient = runtime.oauthProvider.clientsStore.registerClient;
+    if (!registerClient) {
+      throw new ServerError("Client registration is not supported");
+    }
+
+    const client: OAuthClientInformationFull = await registerClient.call(
+      runtime.oauthProvider.clientsStore,
+      {
+      ...metadata,
+      client_secret: isPublicClient ? undefined : randomBytes(32).toString("hex"),
+      client_secret_expires_at: isPublicClient ? undefined : issuedAt + 30 * 24 * 60 * 60
+      }
+    );
+
+    return createJsonResponse(client, 201, corsHeaders({ "Cache-Control": "no-store" }));
+  } catch (error) {
+    if (error instanceof OAuthError) {
+      return createOAuthErrorResponse(error, undefined, corsHeaders());
+    }
+    const serverError = new ServerError(error instanceof Error ? error.message : String(error));
+    return createOAuthErrorResponse(serverError, 500, corsHeaders());
+  }
+}
+
+async function handleToken(
+  runtime: Runtime,
+  request: Request,
+  rateLimiter: RateLimiter
+): Promise<Response> {
+  if (request.method !== "POST") {
+    return createOAuthErrorResponse(new InvalidRequestError("Method not allowed"), 405, corsHeaders());
+  }
+
+  if (!rateLimiter.allow(requestKey(request, "token"), TOKEN_RATE_LIMIT)) {
+    return createOAuthErrorResponse(new InvalidRequestError("Rate limit exceeded"), 429, corsHeaders());
+  }
+
+  try {
+    const body = await parseFormBody(request);
+    const client = await authenticateClient(runtime, request, body);
+    const grantType = requiredField(body.grant_type, "grant_type");
+
+    switch (grantType) {
+      case "authorization_code": {
+        const code = requiredField(body.code, "code");
+        const codeVerifier = requiredField(body.code_verifier, "code_verifier");
+
+        if (!runtime.oauthProvider.skipLocalPkceValidation) {
+          const codeChallenge = await runtime.oauthProvider.challengeForAuthorizationCode(client, code);
+          const valid = await verifyPkceChallenge(codeVerifier, codeChallenge);
+          if (!valid) {
+            throw new InvalidGrantError("code_verifier does not match the challenge");
+          }
+        }
+
+        const tokens = await runtime.oauthProvider.exchangeAuthorizationCode(
+          client,
+          code,
+          runtime.oauthProvider.skipLocalPkceValidation ? codeVerifier : undefined,
+          body.redirect_uri,
+          body.resource ? new URL(body.resource) : undefined
+        );
+        return createJsonResponse(tokens, 200, corsHeaders({ "Cache-Control": "no-store" }));
+      }
+
+      case "refresh_token": {
+        const refreshToken = requiredField(body.refresh_token, "refresh_token");
+        const tokens = await runtime.oauthProvider.exchangeRefreshToken(
+          client,
+          refreshToken,
+          body.scope ? body.scope.split(" ").filter(Boolean) : undefined,
+          body.resource ? new URL(body.resource) : undefined
+        );
+        return createJsonResponse(tokens, 200, corsHeaders({ "Cache-Control": "no-store" }));
+      }
+
+      default:
+        throw new UnsupportedGrantTypeError("Unsupported grant type");
+    }
+  } catch (error) {
+    if (error instanceof OAuthError) {
+      return createOAuthErrorResponse(error, undefined, corsHeaders());
+    }
+    const serverError = new ServerError(error instanceof Error ? error.message : String(error));
+    return createOAuthErrorResponse(serverError, 500, corsHeaders());
+  }
+}
+
+async function handleRevoke(
+  runtime: Runtime,
+  request: Request,
+  rateLimiter: RateLimiter
+): Promise<Response> {
+  if (request.method !== "POST") {
+    return createOAuthErrorResponse(new InvalidRequestError("Method not allowed"), 405, corsHeaders());
+  }
+
+  if (!rateLimiter.allow(requestKey(request, "revoke"), TOKEN_RATE_LIMIT)) {
+    return createOAuthErrorResponse(new InvalidRequestError("Rate limit exceeded"), 429, corsHeaders());
+  }
+
+  try {
+    const body = await parseFormBody(request);
+    const client = await authenticateClient(runtime, request, body);
+    const token = requiredField(body.token, "token");
+
+    if (runtime.oauthProvider.revokeToken) {
+      await runtime.oauthProvider.revokeToken(client, { token });
+    }
+
+    return new Response(null, {
+      headers: corsHeaders({ "Cache-Control": "no-store" }),
+      status: 200
+    });
+  } catch (error) {
+    if (error instanceof OAuthError) {
+      return createOAuthErrorResponse(error, undefined, corsHeaders());
+    }
+    const serverError = new ServerError(error instanceof Error ? error.message : String(error));
+    return createOAuthErrorResponse(serverError, 500, corsHeaders());
+  }
+}
+
+async function handleMcp(
+  runtime: Runtime,
+  request: Request,
+  rateLimiter: RateLimiter
+): Promise<Response> {
+  if (!rateLimiter.allow(requestKey(request, "mcp"), MCP_RATE_LIMIT)) {
+    return createJsonResponse(
+      {
+        error: {
+          message: "Rate limit exceeded."
+        }
+      },
+      429
+    );
+  }
+
+  let authInfo: AuthInfo | undefined;
+  if (runtime.config.oauth.enabled) {
+    const auth = await authenticateBearerRequest(runtime, request);
+    if (auth instanceof Response) {
+      return auth;
+    }
+    authInfo = auth;
+  }
+
+  const transport = new WebStandardStreamableHTTPServerTransport({
+    enableJsonResponse: true,
+    sessionIdGenerator: undefined
+  });
+  const server = createServer(runtime.config, runtime.credentials);
+  await server.connect(transport);
+  return transport.handleRequest(request, { authInfo });
+}
+
+function handleSettings(runtime: Runtime, request: Request): Response {
+  const session = readSessionFromCookieHeader(
+    request.headers.get("cookie") ?? undefined,
+    runtime.config.oauth
+  );
+  const csrf = ensureCsrfToken(request.headers.get("cookie") ?? undefined);
+  const headers = new Headers();
+  if (csrf.cookie) {
+    headers.append("Set-Cookie", buildCsrfCookie(runtime.config.oauth, csrf.cookie));
+  }
+
+  if (!session) {
+    return createHtmlResponse(renderSessionRequiredPage("settings"), 401, headers);
+  }
+
+  return createHtmlResponse(
+    renderSettingsPage({
+      csrfToken: csrf.token,
+      session,
+      status: runtime.credentials.getConnectionStatus(session.userId)
+    }),
+    200,
+    headers
+  );
+}
+
+async function handleSettingsRotate(runtime: Runtime, request: Request): Promise<Response> {
+  const session = readSessionFromCookieHeader(
+    request.headers.get("cookie") ?? undefined,
+    runtime.config.oauth
+  );
+  const csrf = ensureCsrfToken(request.headers.get("cookie") ?? undefined);
+  const headers = new Headers();
+  if (csrf.cookie) {
+    headers.append("Set-Cookie", buildCsrfCookie(runtime.config.oauth, csrf.cookie));
+  }
+
+  if (!session) {
+    return createHtmlResponse(renderSessionRequiredPage("settings"), 401, headers);
+  }
+
+  const body = await parseFormBody(request);
+  if (!validateCsrfToken(request.headers.get("cookie") ?? undefined, body.csrf_token)) {
+    return createHtmlResponse(
+      renderSettingsPage({
+        csrfToken: csrf.token,
+        errorMessage: "Your session expired. Reload the page and try again.",
+        session,
+        status: runtime.credentials.getConnectionStatus(session.userId)
+      }),
+      403,
+      headers
+    );
+  }
+
+  const edToken = body.ed_token?.trim() || "";
+  if (!edToken) {
+    return createHtmlResponse(
+      renderSettingsPage({
+        csrfToken: csrf.token,
+        errorMessage: "Ed API token is required.",
+        session,
+        status: runtime.credentials.getConnectionStatus(session.userId)
+      }),
+      422,
+      headers
+    );
+  }
+
+  try {
+    await runtime.credentials.connect(session.userId, edToken);
+    return redirectResponse("/settings", headers);
+  } catch (error) {
+    return createHtmlResponse(
+      renderSettingsPage({
+        csrfToken: csrf.token,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        session,
+        status: runtime.credentials.getConnectionStatus(session.userId)
+      }),
+      422,
+      headers
+    );
+  }
+}
+
+async function handleSettingsDelete(runtime: Runtime, request: Request): Promise<Response> {
+  const session = readSessionFromCookieHeader(
+    request.headers.get("cookie") ?? undefined,
+    runtime.config.oauth
+  );
+  const csrf = ensureCsrfToken(request.headers.get("cookie") ?? undefined);
+  const headers = new Headers();
+  if (csrf.cookie) {
+    headers.append("Set-Cookie", buildCsrfCookie(runtime.config.oauth, csrf.cookie));
+  }
+
+  if (!session) {
+    return createHtmlResponse(renderSessionRequiredPage("settings"), 401, headers);
+  }
+
+  const body = await parseFormBody(request);
+  if (!validateCsrfToken(request.headers.get("cookie") ?? undefined, body.csrf_token)) {
+    return createHtmlResponse(
+      renderSettingsPage({
+        csrfToken: csrf.token,
+        errorMessage: "Your session expired. Reload the page and try again.",
+        session,
+        status: runtime.credentials.getConnectionStatus(session.userId)
+      }),
+      403,
+      headers
+    );
+  }
+
+  runtime.credentials.delete(session.userId);
+  runtime.users.deleteAccount(session.userId);
+  headers.append("Set-Cookie", buildExpiredSessionCookie(runtime.config.oauth));
+  headers.append("Set-Cookie", buildExpiredCsrfCookie(runtime.config.oauth));
+
+  return createHtmlResponse(renderDeletedPage(), 200, headers);
+}
+
+function handleReconnect(runtime: Runtime, request: Request): Response {
+  const session = readSessionFromCookieHeader(
+    request.headers.get("cookie") ?? undefined,
+    runtime.config.oauth
+  );
+  const csrf = ensureCsrfToken(request.headers.get("cookie") ?? undefined);
+  const headers = new Headers();
+  if (csrf.cookie) {
+    headers.append("Set-Cookie", buildCsrfCookie(runtime.config.oauth, csrf.cookie));
+  }
+
+  if (!session) {
+    return createHtmlResponse(renderSessionRequiredPage("reconnect"), 401, headers);
+  }
+
+  return createHtmlResponse(
+    renderReconnectPage({
+      csrfToken: csrf.token,
+      session,
+      status: runtime.credentials.getConnectionStatus(session.userId)
+    }),
+    200,
+    headers
+  );
+}
+
+async function handleReconnectSubmit(runtime: Runtime, request: Request): Promise<Response> {
+  const session = readSessionFromCookieHeader(
+    request.headers.get("cookie") ?? undefined,
+    runtime.config.oauth
+  );
+  const csrf = ensureCsrfToken(request.headers.get("cookie") ?? undefined);
+  const headers = new Headers();
+  if (csrf.cookie) {
+    headers.append("Set-Cookie", buildCsrfCookie(runtime.config.oauth, csrf.cookie));
+  }
+
+  if (!session) {
+    return createHtmlResponse(renderSessionRequiredPage("reconnect"), 401, headers);
+  }
+
+  const body = await parseFormBody(request);
+  if (!validateCsrfToken(request.headers.get("cookie") ?? undefined, body.csrf_token)) {
+    return createHtmlResponse(
+      renderReconnectPage({
+        csrfToken: csrf.token,
+        errorMessage: "Your session expired. Reload the page and try again.",
+        session,
+        status: runtime.credentials.getConnectionStatus(session.userId)
+      }),
+      403,
+      headers
+    );
+  }
+
+  const edToken = body.ed_token?.trim() || "";
+  if (!edToken) {
+    return createHtmlResponse(
+      renderReconnectPage({
+        csrfToken: csrf.token,
+        errorMessage: "Ed API token is required.",
+        session,
+        status: runtime.credentials.getConnectionStatus(session.userId)
+      }),
+      422,
+      headers
+    );
+  }
+
+  try {
+    await runtime.credentials.connect(session.userId, edToken);
+    return redirectResponse("/settings", headers);
+  } catch (error) {
+    return createHtmlResponse(
+      renderReconnectPage({
+        csrfToken: csrf.token,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        session,
+        status: runtime.credentials.getConnectionStatus(session.userId)
+      }),
+      422,
+      headers
+    );
+  }
+}
+
+async function authenticateBearerRequest(
+  runtime: Runtime,
+  request: Request
+): Promise<AuthInfo | Response> {
+  const authorization = request.headers.get("authorization");
+  if (!authorization?.startsWith("Bearer ")) {
+    return unauthorizedResponse(runtime, "Bearer token is required.");
+  }
+
+  try {
+    const authInfo = await runtime.oauthProvider.verifyAccessToken(
+      authorization.slice("Bearer ".length)
+    );
+    if (!authInfo.scopes.includes(runtime.config.oauth.readScope)) {
+      return forbiddenResponse("Read scope is required.");
+    }
+    return authInfo;
+  } catch (error) {
+    return unauthorizedResponse(
+      runtime,
+      error instanceof Error ? error.message : "Invalid bearer token."
+    );
+  }
+}
+
+async function authenticateClient(
+  runtime: Runtime,
+  request: Request,
+  body: Record<string, string>
+): Promise<OAuthClientInformationFull> {
+  const basic = request.headers.get("authorization");
+  let clientId = body.client_id;
+  let clientSecret = body.client_secret;
+
+  if (basic?.startsWith("Basic ")) {
+    const decoded = atob(basic.slice("Basic ".length));
+    const separator = decoded.indexOf(":");
+    clientId = separator >= 0 ? decoded.slice(0, separator) : decoded;
+    clientSecret = separator >= 0 ? decoded.slice(separator + 1) : "";
+  }
+
+  if (!clientId) {
+    throw new InvalidClientError("client_id is required");
+  }
+
+  const client = await runtime.oauthProvider.clientsStore.getClient(clientId);
+  if (!client) {
+    throw new InvalidClientError("Invalid client_id");
+  }
+
+  const authMethod = client.token_endpoint_auth_method ?? "client_secret_basic";
+  if (authMethod === "none") {
+    return client;
+  }
+
+  if (!clientSecret || client.client_secret !== clientSecret) {
+    throw new InvalidClientError("Client authentication failed");
+  }
+
+  return client;
+}
+
+async function parseFormBody(request: Request): Promise<Record<string, string>> {
+  const formData = await request.formData();
+  const body: Record<string, string> = {};
+
+  for (const [key, value] of formData.entries()) {
+    if (typeof value === "string") {
+      body[key] = value;
+    }
+  }
+
+  return body;
+}
+
+function resolveRedirectUri(
+  client: OAuthClientInformationFull,
+  requestedRedirectUri?: string
+): string {
+  if (requestedRedirectUri) {
+    if (!client.redirect_uris.includes(requestedRedirectUri)) {
+      throw new InvalidRequestError("Unregistered redirect_uri");
+    }
+    return requestedRedirectUri;
+  }
+
+  if (client.redirect_uris.length !== 1) {
+    throw new InvalidRequestError(
+      "redirect_uri must be provided when multiple redirect URIs are registered"
+    );
+  }
+
+  return client.redirect_uris[0]!;
+}
+
+async function verifyPkceChallenge(
+  codeVerifier: string,
+  codeChallenge: string
+): Promise<boolean> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(codeVerifier)
+  );
+  const encoded = Buffer.from(digest).toString("base64url");
+  return encoded === codeChallenge;
+}
+
+function createJsonResponse(
+  body: unknown,
+  status: number = 200,
+  headers?: HeadersInit
+): Response {
+  const resolvedHeaders = new Headers(headers);
+  if (!resolvedHeaders.has("Content-Type")) {
+    resolvedHeaders.set("Content-Type", "application/json");
+  }
+
+  return new Response(JSON.stringify(body), {
+    headers: resolvedHeaders,
+    status
+  });
+}
+
+function createHtmlResponse(
+  html: string,
+  status: number = 200,
+  headers?: Headers
+): Response {
+  const resolvedHeaders = headers ?? new Headers();
+  if (!resolvedHeaders.has("Content-Type")) {
+    resolvedHeaders.set("Content-Type", "text/html; charset=utf-8");
+  }
+
+  return new Response(html, {
+    headers: resolvedHeaders,
+    status
+  });
+}
+
+function redirectResponse(location: string, headers?: Headers): Response {
+  const resolvedHeaders = headers ?? new Headers();
+  resolvedHeaders.set("Location", location);
+  return new Response(null, {
+    headers: resolvedHeaders,
+    status: 302
+  });
+}
+
+function createCorsPreflightResponse(): Response {
+  return new Response(null, {
+    headers: corsHeaders(),
+    status: 204
+  });
+}
+
+function corsHeaders(extra?: Record<string, string>): Headers {
+  return new Headers({
+    "Access-Control-Allow-Headers": "Authorization, Content-Type",
+    "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+    "Access-Control-Allow-Origin": "*",
+    ...(extra ?? {})
+  });
+}
+
+function createOAuthErrorResponse(
+  error: OAuthError,
+  status?: number,
+  headers?: Headers
+): Response {
+  const resolvedHeaders = headers ?? new Headers();
+  resolvedHeaders.set("Cache-Control", "no-store");
+  return createJsonResponse(
+    error.toResponseObject(),
+    status ?? (error instanceof ServerError ? 500 : 400),
+    resolvedHeaders
+  );
+}
+
+function unauthorizedResponse(runtime: Runtime, message: string): Response {
+  return createJsonResponse(
+    {
+      error: "unauthorized",
+      error_description: message
+    },
+    401,
+    {
+      "WWW-Authenticate": `Bearer resource_metadata="${getOAuthProtectedResourceMetadataUrl(
+        runtime.config.oauth.mcpServerUrl
+      )}"`
+    }
+  );
+}
+
+function forbiddenResponse(message: string): Response {
+  return createJsonResponse(
+    {
+      error: "insufficient_scope",
+      error_description: message
+    },
+    403
+  );
+}
+
+function requestKey(request: Request, namespace: string): string {
+  const forwardedFor =
+    request.headers.get("x-forwarded-for") ??
+    request.headers.get("x-real-ip") ??
+    "anonymous";
+  return `${namespace}:${forwardedFor}`;
+}
+
+type RateLimitConfig = {
+  limit: number;
+  windowMs: number;
+};
+
+type RateLimiter = {
+  allow(key: string, config: RateLimitConfig): boolean;
+};
+
+function createRateLimiter(): RateLimiter {
+  const hits = new Map<string, number[]>();
+
+  return {
+    allow(key, config) {
+      const now = Date.now();
+      const current = hits.get(key) ?? [];
+      const next = current.filter((timestamp) => now - timestamp < config.windowMs);
+      if (next.length >= config.limit) {
+        hits.set(key, next);
+        return false;
+      }
+      next.push(now);
+      hits.set(key, next);
+      return true;
+    }
+  };
+}
+
+function isCorsPath(pathname: string, runtime: Runtime): boolean {
+  if (!runtime.config.oauth.enabled) {
+    return false;
+  }
+
+  return (
+    pathname === "/register" ||
+    pathname === "/token" ||
+    pathname === "/revoke" ||
+    pathname === "/.well-known/oauth-authorization-server" ||
+    pathname ===
+      new URL(getOAuthProtectedResourceMetadataUrl(runtime.config.oauth.mcpServerUrl)).pathname
+  );
+}
+
+function requiredField(value: string | undefined, name: string): string {
+  if (!value) {
+    throw new InvalidRequestError(`${name} is required`);
+  }
+  return value;
+}
+
+function serializeError(error: unknown): Record<string, unknown> {
+  if (error instanceof Error) {
+    return {
+      message: error.message,
+      name: error.name,
+      stack: error.stack
+    };
+  }
+
+  return {
+    value: String(error)
+  };
 }
 
 function renderSessionRequiredPage(kind: "settings" | "reconnect"): string {

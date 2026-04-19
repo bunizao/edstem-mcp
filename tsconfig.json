@@ -1,9 +1,8 @@
 {
   "compilerOptions": {
-    "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "outDir": "dist",
+    "target": "ESNext",
+    "module": "Preserve",
+    "moduleResolution": "Bundler",
     "rootDir": ".",
     "strict": true,
     "noUncheckedIndexedAccess": true,
@@ -11,7 +10,8 @@
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "declaration": true
+    "types": ["bun-types", "node"],
+    "lib": ["ESNext", "DOM"]
   },
   "include": ["src/**/*.ts", "test/**/*.ts"]
 }

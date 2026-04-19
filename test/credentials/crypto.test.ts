@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 
 import { decryptToken, encryptToken } from "../../src/credentials/crypto.js";
 

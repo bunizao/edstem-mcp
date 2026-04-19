@@ -1,23 +1,22 @@
-FROM node:20-bookworm AS build
+FROM oven/bun:1 AS build
 WORKDIR /app
 
-COPY package*.json ./
-RUN npm ci
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile
 
 COPY . .
-RUN npm run build && npm prune --omit=dev
+RUN bun test
+RUN bun run build
 
-FROM node:20-bookworm-slim AS runtime
+FROM oven/bun:1 AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
-COPY --from=build /app/package*.json ./
-COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/dist ./dist
-COPY --from=build /app/src/db/migrations ./src/db/migrations
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile --production
 
-RUN useradd --create-home --uid 1001 appuser && chown -R appuser:appuser /app
-USER appuser
+COPY src ./src
+COPY dist ./dist
 
 EXPOSE 8787
-CMD ["node", "dist/index.js"]
+CMD ["bun", "src/index.ts"]

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 
 import { filterThreads } from "../src/ed/filter.js";
 import type { Thread } from "../src/ed/models.js";

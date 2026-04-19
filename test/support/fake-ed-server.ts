@@ -1,8 +1,3 @@
-import type { AddressInfo } from "node:net";
-import { once } from "node:events";
-
-import express from "express";
-
 export interface FakeEdUser {
   answerResult?: {
     correct?: boolean | null;
@@ -35,9 +30,6 @@ export interface FakeEdUser {
 }
 
 export async function startFakeEdServer(users: FakeEdUser[]) {
-  const app = express();
-  app.use(express.json());
-
   const submissions = {
     answers: [] as Array<{
       amend: boolean;
@@ -52,82 +44,92 @@ export async function startFakeEdServer(users: FakeEdUser[]) {
   };
 
   const byToken = new Map(users.map((user) => [user.token, user]));
+  const server = Bun.serve({
+    async fetch(request: Request): Promise<Response> {
+      const url = new URL(request.url);
+      const token = getToken(request.headers.get("authorization"));
+      const user = token ? byToken.get(token) : undefined;
 
-  app.get("/api/user", (request, response) => {
-    const user = getUser(request.header("authorization"), byToken);
-    if (!user) {
-      response.status(401).json({ code: "bad_token", message: "invalid token" });
-      return;
+      if (request.method === "GET" && url.pathname === "/api/user") {
+        if (!user) {
+          return jsonResponse({ code: "bad_token", message: "invalid token" }, 401);
+        }
+        return jsonResponse({
+          courses: user.courses,
+          user: user.user
+        });
+      }
+
+      if (
+        request.method === "POST" &&
+        url.pathname === "/api/lessons/slides/questions/" + extractId(url.pathname, 5) + "/responses"
+      ) {
+        if (!user) {
+          return jsonResponse({ code: "bad_token", message: "invalid token" }, 401);
+        }
+
+        const questionId = Number.parseInt(extractId(url.pathname, 5), 10);
+        submissions.answers.push({
+          amend: url.searchParams.get("amend") === "1",
+          body: await request.json(),
+          questionId,
+          token: user.token
+        });
+
+        return jsonResponse({
+          correct: user.answerResult?.correct ?? true,
+          explanation: user.answerResult?.explanation ?? null,
+          slide_completed: user.answerResult?.slide_completed ?? true,
+          solution: user.answerResult?.solution ?? [1]
+        });
+      }
+
+      if (
+        request.method === "POST" &&
+        url.pathname === "/api/lessons/slides/" + extractId(url.pathname, 4) + "/questions/submit_all"
+      ) {
+        if (!user) {
+          return jsonResponse({ code: "bad_token", message: "invalid token" }, 401);
+        }
+
+        const slideId = Number.parseInt(extractId(url.pathname, 4), 10);
+        submissions.slides.push({
+          slideId,
+          token: user.token
+        });
+
+        return jsonResponse({ submitted: true });
+      }
+
+      return new Response("not found", { status: 404 });
     }
-
-    response.json({
-      courses: user.courses,
-      user: user.user
-    });
   });
-
-  app.post("/api/lessons/slides/questions/:questionId/responses", (request, response) => {
-    const user = getUser(request.header("authorization"), byToken);
-    if (!user) {
-      response.status(401).json({ code: "bad_token", message: "invalid token" });
-      return;
-    }
-
-    submissions.answers.push({
-      amend: request.query.amend === "1",
-      body: request.body,
-      questionId: Number.parseInt(request.params.questionId, 10),
-      token: user.token
-    });
-
-    response.json({
-      correct: user.answerResult?.correct ?? true,
-      explanation: user.answerResult?.explanation ?? null,
-      slide_completed: user.answerResult?.slide_completed ?? true,
-      solution: user.answerResult?.solution ?? [1]
-    });
-  });
-
-  app.post("/api/lessons/slides/:slideId/questions/submit_all", (request, response) => {
-    const user = getUser(request.header("authorization"), byToken);
-    if (!user) {
-      response.status(401).json({ code: "bad_token", message: "invalid token" });
-      return;
-    }
-
-    submissions.slides.push({
-      slideId: Number.parseInt(request.params.slideId, 10),
-      token: user.token
-    });
-
-    response.json({ submitted: true });
-  });
-
-  const server = app.listen(0);
-  await once(server, "listening");
-  const address = server.address() as AddressInfo;
 
   return {
-    baseUrl: `http://127.0.0.1:${address.port}/api/`,
+    baseUrl: `http://127.0.0.1:${server.port}/api/`,
     close: async () => {
-      await new Promise<void>((resolve, reject) => {
-        server.close((error) => {
-          if (error) {
-            reject(error);
-            return;
-          }
-          resolve();
-        });
-      });
+      server.stop(true);
     },
     submissions
   };
 }
 
-function getUser(
-  authorization: string | undefined,
-  byToken: Map<string, FakeEdUser>
-): FakeEdUser | undefined {
-  const token = authorization?.replace(/^Bearer\s+/i, "") || "";
-  return byToken.get(token);
+function getToken(authorization: string | null): string | undefined {
+  if (!authorization?.startsWith("Bearer ")) {
+    return undefined;
+  }
+  return authorization.slice("Bearer ".length);
+}
+
+function jsonResponse(body: unknown, status: number = 200): Response {
+  return new Response(JSON.stringify(body), {
+    headers: {
+      "Content-Type": "application/json"
+    },
+    status
+  });
+}
+
+function extractId(pathname: string, index: number): string {
+  return pathname.split("/")[index] ?? "";
 }

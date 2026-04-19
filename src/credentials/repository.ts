@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { Database } from "bun:sqlite";
 
 export interface CredentialRecord {
   authTag: Buffer;
@@ -27,19 +27,19 @@ type CredentialRow = {
 };
 
 export class CredentialsRepository {
-  private readonly db: Database.Database;
+  private readonly db: Database;
 
-  constructor(db: Database.Database) {
+  constructor(db: Database) {
     this.db = db;
   }
 
   delete(userId: number): void {
-    this.db.prepare("DELETE FROM ed_credentials WHERE user_id = ?").run(userId);
+    this.db.query("DELETE FROM ed_credentials WHERE user_id = ?").run(userId);
   }
 
   getByUserId(userId: number): CredentialRecord | null {
     const row = this.db
-      .prepare(
+      .query(
         `
           SELECT user_id, ciphertext, iv, auth_tag, ed_user_id, ed_user_name,
                  is_invalid, last_verified_at, created_at, updated_at
@@ -54,7 +54,7 @@ export class CredentialsRepository {
 
   markInvalid(userId: number): void {
     this.db
-      .prepare("UPDATE ed_credentials SET is_invalid = 1, updated_at = ? WHERE user_id = ?")
+      .query("UPDATE ed_credentials SET is_invalid = 1, updated_at = ? WHERE user_id = ?")
       .run(Date.now(), userId);
   }
 
@@ -69,15 +69,15 @@ export class CredentialsRepository {
   }): void {
     const now = Date.now();
     this.db
-      .prepare(
+      .query(
         `
           INSERT INTO ed_credentials (
             user_id, ciphertext, iv, auth_tag, ed_user_id, ed_user_name,
             is_invalid, last_verified_at, created_at, updated_at
           )
           VALUES (
-            @userId, @ciphertext, @iv, @authTag, @edUserId, @edUserName,
-            0, @lastVerifiedAt, @now, @now
+            ?, ?, ?, ?, ?, ?,
+            0, ?, ?, ?
           )
           ON CONFLICT(user_id) DO UPDATE SET
             ciphertext = excluded.ciphertext,
@@ -90,16 +90,17 @@ export class CredentialsRepository {
             updated_at = excluded.updated_at
         `
       )
-      .run({
-        authTag: input.authTag,
-        ciphertext: input.ciphertext,
-        edUserId: input.edUserId,
-        edUserName: input.edUserName,
-        iv: input.iv,
-        lastVerifiedAt: input.lastVerifiedAt,
+      .run(
+        input.userId,
+        input.ciphertext,
+        input.iv,
+        input.authTag,
+        input.edUserId,
+        input.edUserName,
+        input.lastVerifiedAt,
         now,
-        userId: input.userId
-      });
+        now
+      );
   }
 }
 
