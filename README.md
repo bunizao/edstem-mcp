@@ -78,6 +78,8 @@ Useful overrides:
 - `PUBLIC_BASE_URL=http://your-host:9000` to make OAuth metadata point at the real public URL
 - `DB_CLEANUP_INTERVAL_SECONDS=300` to prune expired OAuth rows every 5 minutes
 
+`PUBLIC_BASE_URL` is intentionally explicit. It should match the real external URL clients use, instead of being guessed from the host port mapping.
+
 No reverse proxy is included. If you want TLS later, put one in front yourself.
 
 ## Backup

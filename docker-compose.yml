@@ -21,7 +21,7 @@ services:
       ED_API_BASE_URL: https://edstem.org/api/
       MASTER_KEY: ${MASTER_KEY}
       PORT: 8787
-      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:${APP_PORT:-8787}}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
     ports:
       - "${APP_PORT:-8787}:8787"
     volumes:
