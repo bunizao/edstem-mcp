@@ -1,37 +1,16 @@
 # edstem-mcp
 
-Bun-native remote MCP server for Ed Discussion with per-user OAuth, encrypted Ed tokens, and read/write tools.
+Public MCP service for Ed Discussion. Use the hosted endpoint from your MCP client first; self-hosting details are below.
 
-## Requirements
+## Using The Service
 
-- Bun 1.3+
-- `MASTER_KEY` as a 32-byte base64 string
+1. Add the service URL to your MCP client.
+2. Sign in with your Ed API token.
+3. Grant `mcp:tools.read`, and `mcp:tools.write` only if you want write tools.
 
-## Scripts
+You can get your token here: [https://edstem.org/settings/api-tokens](https://edstem.org/settings/api-tokens)
 
-```bash
-bun install
-bun run dev
-bun run test
-bun run check
-bun run build
-bun run admin -- reset-password <email> [new-password]
-bun run db:prune
-```
-
-## Environment
-
-- Copy `.env.example` to `.env` and fill in `MASTER_KEY`.
-- `MASTER_KEY`: required, 32-byte base64 key for Ed token encryption
-- `DATABASE_PATH`: optional, defaults to `.data/edstem-mcp.db`
-- `DB_CLEANUP_INTERVAL_SECONDS`: optional, defaults to `900`
-- `PUBLIC_BASE_URL`: optional, defaults to `http://localhost:${PORT}`
-- `PORT`: optional, defaults to `8787`
-- `MCP_PATH`: optional, defaults to `/mcp`
-- `ED_API_BASE_URL`: optional, defaults to `https://edstem.org/api/`
-- `ED_API_TOKEN`: optional Bun-local fallback for development only
-- `OAUTH_ACCESS_TOKEN_TTL_SECONDS`: optional, defaults to `3600`
-- `OAUTH_REFRESH_TOKEN_TTL_SECONDS`: optional, defaults to `2592000`
+No country code is needed. This service follows the same Ed token flow as [edstem-cli](https://github.com/bunizao/edstem-cli): it verifies the token with `GET /api/user`.
 
 ## Tools
 
@@ -48,11 +27,44 @@ bun run db:prune
 - `submit_slide_answer`
 - `submit_slide`
 
-## Local Run
+## Self-Hosting
+
+### Requirements
+
+- Bun 1.3+
+- `MASTER_KEY` as a 32-byte base64 string
+
+### Scripts
+
+```bash
+bun install
+bun run dev
+bun run test
+bun run check
+bun run build
+bun run admin -- reset-password <email> [new-password]
+bun run db:prune
+```
+
+### Environment
+
+- Copy `.env.example` to `.env` and fill in `MASTER_KEY`.
+- `MASTER_KEY`: required, 32-byte base64 key for Ed token encryption
+- `DATABASE_PATH`: optional, defaults to `.data/edstem-mcp.db`
+- `DB_CLEANUP_INTERVAL_SECONDS`: optional, defaults to `900`
+- `PUBLIC_BASE_URL`: required for self-hosting, must match the real external URL
+- `PORT`: optional, defaults to `8787`
+- `MCP_PATH`: optional, defaults to `/mcp`
+- `ED_API_BASE_URL`: optional, defaults to `https://edstem.org/api/`
+- `ED_API_TOKEN`: optional Bun-local fallback for development only
+- `OAUTH_ACCESS_TOKEN_TTL_SECONDS`: optional, defaults to `3600`
+- `OAUTH_REFRESH_TOKEN_TTL_SECONDS`: optional, defaults to `2592000`
+
+### Local Run
 
 ```bash
 cp .env.example .env
-# Fill in MASTER_KEY first.
+# Fill in MASTER_KEY and PUBLIC_BASE_URL first.
 bun run start
 ```
 
@@ -61,28 +73,17 @@ Health endpoints:
 - `/healthz`
 - `/readyz`
 
-## Docker
+### Docker
 
 ```bash
 cp .env.example .env
-# Fill in MASTER_KEY first.
+# Fill in MASTER_KEY and PUBLIC_BASE_URL first.
 docker compose up -d --build
 ```
 
-The compose file publishes the app directly on `8787` by default.
-The image ships with a `readyz` health check, and the compose file stays thin.
+The image ships with a `readyz` health check.
 
-Useful overrides:
-
-- `PUBLIC_BASE_URL=http://your-host:9000` to make OAuth metadata point at the real public URL
-- `DB_CLEANUP_INTERVAL_SECONDS=300` to prune expired OAuth rows every 5 minutes
-
-`PUBLIC_BASE_URL` is intentionally explicit. It should match the real external URL clients use, instead of being guessed from the host port mapping.
-If you want a different published port, edit [docker-compose.yml](/Users/tutu/Library/CloudStorage/Dropbox/Dev/edstem-mcp/docker-compose.yml) directly or use a compose override file.
-
-No reverse proxy is included. If you want TLS later, put one in front yourself.
-
-## Backup
+### Backup
 
 Use the included scripts:
 
