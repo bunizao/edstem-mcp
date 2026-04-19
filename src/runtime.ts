@@ -33,6 +33,7 @@ export function createRuntime(config: AppConfig, logger?: Logger): Runtime {
   const oauthProvider = new EdstemOAuthProvider({
     config,
     credentials,
+    logger: resolvedLogger,
     store,
     users
   });

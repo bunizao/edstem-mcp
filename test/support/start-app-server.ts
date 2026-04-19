@@ -32,6 +32,7 @@ export async function startAppServer(
     runtime.oauthProvider = new EdstemOAuthProvider({
       config: runtime.config,
       credentials: runtime.credentials,
+      logger: runtime.logger,
       store: runtime.store,
       users: runtime.users
     });

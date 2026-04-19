@@ -14,6 +14,7 @@ import {
   InvalidRequestError,
   OAuthError,
   ServerError,
+  TemporarilyUnavailableError,
   UnsupportedGrantTypeError
 } from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import {
@@ -30,9 +31,10 @@ import {
   validateCsrfToken
 } from "./oauth/csrf.js";
 import { BunAuthorizeResponse } from "./oauth/http.js";
+import { renderAuthorizePage as renderAuthorizeHtml } from "./oauth/login-page.js";
 import {
   buildExpiredSessionCookie,
-  readSessionFromCookieHeader
+  readSessionStateFromCookieHeader
 } from "./oauth/session.js";
 
 const AUTH_RATE_LIMIT = {
@@ -55,9 +57,29 @@ const TOKEN_RATE_LIMIT = {
   windowMs: 15 * 60 * 1000
 } as const;
 
+const SIGNIN_ATTEMPT_RATE_LIMIT = {
+  limit: 5,
+  windowMs: 15 * 60 * 1000
+} as const;
+
+const SIGNUP_ATTEMPT_RATE_LIMIT = {
+  limit: 5,
+  windowMs: 15 * 60 * 1000
+} as const;
+
+const ED_TOKEN_ATTEMPT_RATE_LIMIT = {
+  limit: 5,
+  windowMs: 15 * 60 * 1000
+} as const;
+
 export interface BunApp {
   fetch(request: Request): Promise<Response>;
 }
+
+type RequestContext = {
+  clientIp: string;
+  requestId: string;
+};
 
 export function createApp(runtime: Runtime): BunApp {
   const authMetadataPath = "/.well-known/oauth-authorization-server";
@@ -76,6 +98,12 @@ export function createApp(runtime: Runtime): BunApp {
   return {
     async fetch(request: Request): Promise<Response> {
       const startedAt = Date.now();
+      const requestId = randomUUID();
+      const clientIp = getClientIp(request);
+      const context: RequestContext = {
+        clientIp,
+        requestId
+      };
       let response: Response;
 
       try {
@@ -83,6 +111,7 @@ export function createApp(runtime: Runtime): BunApp {
           runtime,
           request,
           rateLimiter,
+          context,
           authMetadataPath,
           protectedResourceMetadataPath,
           oauthMetadata
@@ -90,8 +119,10 @@ export function createApp(runtime: Runtime): BunApp {
       } catch (error) {
         runtime.logger.error(
           {
+            clientIp,
             error: serializeError(error),
             method: request.method,
+            requestId,
             url: request.url
           },
           "request failed"
@@ -106,11 +137,13 @@ export function createApp(runtime: Runtime): BunApp {
         );
       }
 
+      response.headers.set("X-Request-Id", requestId);
       runtime.logger.info(
         {
+          clientIp,
           durationMs: Date.now() - startedAt,
           method: request.method,
-          requestId: randomUUID(),
+          requestId,
           statusCode: response.status,
           url: request.url
         },
@@ -126,6 +159,7 @@ async function routeRequest(
   runtime: Runtime,
   request: Request,
   rateLimiter: RateLimiter,
+  context: RequestContext,
   authMetadataPath: string,
   protectedResourceMetadataPath: string,
   oauthMetadata: Record<string, unknown> | null
@@ -169,19 +203,19 @@ async function routeRequest(
     }
 
     if (pathname === "/register") {
-      return handleClientRegistration(runtime, request, rateLimiter);
+      return handleClientRegistration(runtime, request, rateLimiter, context);
     }
 
     if (pathname === "/token") {
-      return handleToken(runtime, request, rateLimiter);
+      return handleToken(runtime, request, rateLimiter, context);
     }
 
     if (pathname === "/revoke") {
-      return handleRevoke(runtime, request, rateLimiter);
+      return handleRevoke(runtime, request, rateLimiter, context);
     }
 
     if (pathname === "/authorize") {
-      return handleAuthorize(runtime, request, rateLimiter);
+      return handleAuthorize(runtime, request, rateLimiter, context);
     }
   }
 
@@ -190,7 +224,7 @@ async function routeRequest(
   }
 
   if (pathname === "/settings/rotate" && request.method === "POST") {
-    return handleSettingsRotate(runtime, request);
+    return handleSettingsRotate(runtime, request, rateLimiter, context);
   }
 
   if (pathname === "/settings/delete" && request.method === "POST") {
@@ -202,11 +236,11 @@ async function routeRequest(
   }
 
   if (pathname === "/reconnect" && request.method === "POST") {
-    return handleReconnectSubmit(runtime, request);
+    return handleReconnectSubmit(runtime, request, rateLimiter, context);
   }
 
   if (pathname === runtime.config.mcpPath) {
-    return handleMcp(runtime, request, rateLimiter);
+    return handleMcp(runtime, request, rateLimiter, context);
   }
 
   return new Response("Not found", { status: 404 });
@@ -215,14 +249,11 @@ async function routeRequest(
 async function handleAuthorize(
   runtime: Runtime,
   request: Request,
-  rateLimiter: RateLimiter
+  rateLimiter: RateLimiter,
+  context: RequestContext
 ): Promise<Response> {
   if (request.method !== "GET" && request.method !== "POST") {
     return createOAuthErrorResponse(new InvalidRequestError("Method not allowed"), 405);
-  }
-
-  if (!rateLimiter.allow(requestKey(request, "authorize"), AUTH_RATE_LIMIT)) {
-    return createOAuthErrorResponse(new InvalidRequestError("Rate limit exceeded"), 429);
   }
 
   const form = request.method === "POST" ? await parseFormBody(request) : undefined;
@@ -252,6 +283,12 @@ async function handleAuthorize(
       throw new InvalidClientError("Invalid client_id");
     }
 
+    const requestedScopes = parseRequestedScopes(source.scope, runtime.config);
+    const selectedTab = getAuthorizeTab(form?.tab);
+    const sessionState = readSessionStateFromCookieHeader(
+      request.headers.get("cookie") ?? undefined,
+      runtime.config.oauth
+    );
     const redirectUri = resolveRedirectUri(client, source.redirect_uri);
     const response = new BunAuthorizeResponse({
       body: form,
@@ -260,6 +297,70 @@ async function handleAuthorize(
       },
       method: request.method
     });
+    if (sessionState.reason === "expired" || sessionState.reason === "invalid") {
+      response.appendHeader("Set-Cookie", buildExpiredSessionCookie(runtime.config.oauth));
+    }
+
+    if (!rateLimiter.allow(requestKey(request, "authorize"), AUTH_RATE_LIMIT)) {
+      runtime.logger.warn(
+        {
+          clientId,
+          clientIp: context.clientIp,
+          event: "oauth.authorize.throttled",
+          requestId: context.requestId
+        },
+        "oauth authorize throttled"
+      );
+      return createAuthorizeRateLimitResponse(
+        runtime,
+        client,
+        {
+          codeChallenge,
+          redirectUri,
+          resource: source.resource ? new URL(source.resource) : undefined,
+          scopes: requestedScopes,
+          state: source.state
+        },
+        form,
+        request.method === "POST" ? sessionState : { reason: "missing", session: null },
+        request.headers.get("cookie") ?? undefined,
+        AUTH_RATE_LIMIT
+      );
+    }
+
+    if (
+      request.method === "POST" &&
+      !rateLimiter.allow(
+        buildAuthorizeAttemptKey(request, form ?? {}, sessionState.session),
+        getAuthorizeAttemptRateLimit(form ?? {})
+      )
+    ) {
+      runtime.logger.warn(
+        {
+          clientId,
+          clientIp: context.clientIp,
+          event: "oauth.authorize.attempt_throttled",
+          requestId: context.requestId,
+          tab: selectedTab
+        },
+        "oauth authorize attempt throttled"
+      );
+      return createAuthorizeRateLimitResponse(
+        runtime,
+        client,
+        {
+          codeChallenge,
+          redirectUri,
+          resource: source.resource ? new URL(source.resource) : undefined,
+          scopes: requestedScopes,
+          state: source.state
+        },
+        form,
+        sessionState,
+        request.headers.get("cookie") ?? undefined,
+        getAuthorizeAttemptRateLimit(form ?? {})
+      );
+    }
 
     await runtime.oauthProvider.authorize(
       client,
@@ -267,7 +368,7 @@ async function handleAuthorize(
         codeChallenge,
         redirectUri,
         resource: source.resource ? new URL(source.resource) : undefined,
-        scopes: source.scope ? source.scope.split(" ").filter(Boolean) : undefined,
+        scopes: requestedScopes,
         state: source.state
       },
       response
@@ -276,8 +377,26 @@ async function handleAuthorize(
     return response.toResponse();
   } catch (error) {
     if (error instanceof OAuthError) {
+      runtime.logger.warn(
+        {
+          clientIp: context.clientIp,
+          error: serializeError(error),
+          event: "oauth.authorize.failed",
+          requestId: context.requestId
+        },
+        "oauth authorize failed"
+      );
       return createOAuthErrorResponse(error);
     }
+    runtime.logger.error(
+      {
+        clientIp: context.clientIp,
+        error: serializeError(error),
+        event: "oauth.authorize.crashed",
+        requestId: context.requestId
+      },
+      "oauth authorize crashed"
+    );
     const serverError = new ServerError(error instanceof Error ? error.message : String(error));
     return createOAuthErrorResponse(serverError, 500);
   }
@@ -286,14 +405,27 @@ async function handleAuthorize(
 async function handleClientRegistration(
   runtime: Runtime,
   request: Request,
-  rateLimiter: RateLimiter
+  rateLimiter: RateLimiter,
+  context: RequestContext
 ): Promise<Response> {
   if (request.method !== "POST") {
     return createOAuthErrorResponse(new InvalidRequestError("Method not allowed"), 405, corsHeaders());
   }
 
   if (!rateLimiter.allow(requestKey(request, "register"), CLIENT_REGISTRATION_RATE_LIMIT)) {
-    return createOAuthErrorResponse(new InvalidRequestError("Rate limit exceeded"), 429, corsHeaders());
+    runtime.logger.warn(
+      {
+        clientIp: context.clientIp,
+        event: "oauth.client_registration.throttled",
+        requestId: context.requestId
+      },
+      "oauth client registration throttled"
+    );
+    return createOAuthErrorResponse(
+      new TemporarilyUnavailableError("Too many client registration attempts."),
+      429,
+      withRetryAfterHeaders(CLIENT_REGISTRATION_RATE_LIMIT, corsHeaders())
+    );
   }
 
   try {
@@ -314,14 +446,33 @@ async function handleClientRegistration(
     const client: OAuthClientInformationFull = await registerClient.call(
       runtime.oauthProvider.clientsStore,
       {
-      ...metadata,
-      client_secret: isPublicClient ? undefined : randomBytes(32).toString("hex"),
-      client_secret_expires_at: isPublicClient ? undefined : issuedAt + 30 * 24 * 60 * 60
+        ...metadata,
+        client_secret: isPublicClient ? undefined : randomBytes(32).toString("hex"),
+        client_secret_expires_at: isPublicClient ? undefined : issuedAt + 30 * 24 * 60 * 60
       }
+    );
+
+    runtime.logger.info(
+      {
+        clientId: client.client_id,
+        clientIp: context.clientIp,
+        event: "oauth.client_registration.created",
+        requestId: context.requestId
+      },
+      "oauth client registered"
     );
 
     return createJsonResponse(client, 201, corsHeaders({ "Cache-Control": "no-store" }));
   } catch (error) {
+    runtime.logger.warn(
+      {
+        clientIp: context.clientIp,
+        error: serializeError(error),
+        event: "oauth.client_registration.failed",
+        requestId: context.requestId
+      },
+      "oauth client registration failed"
+    );
     if (error instanceof OAuthError) {
       return createOAuthErrorResponse(error, undefined, corsHeaders());
     }
@@ -333,14 +484,27 @@ async function handleClientRegistration(
 async function handleToken(
   runtime: Runtime,
   request: Request,
-  rateLimiter: RateLimiter
+  rateLimiter: RateLimiter,
+  context: RequestContext
 ): Promise<Response> {
   if (request.method !== "POST") {
     return createOAuthErrorResponse(new InvalidRequestError("Method not allowed"), 405, corsHeaders());
   }
 
   if (!rateLimiter.allow(requestKey(request, "token"), TOKEN_RATE_LIMIT)) {
-    return createOAuthErrorResponse(new InvalidRequestError("Rate limit exceeded"), 429, corsHeaders());
+    runtime.logger.warn(
+      {
+        clientIp: context.clientIp,
+        event: "oauth.token.throttled",
+        requestId: context.requestId
+      },
+      "oauth token throttled"
+    );
+    return createOAuthErrorResponse(
+      new TemporarilyUnavailableError("Too many token requests."),
+      429,
+      withRetryAfterHeaders(TOKEN_RATE_LIMIT, corsHeaders())
+    );
   }
 
   try {
@@ -368,6 +532,16 @@ async function handleToken(
           body.redirect_uri,
           body.resource ? new URL(body.resource) : undefined
         );
+        runtime.logger.info(
+          {
+            clientId: client.client_id,
+            clientIp: context.clientIp,
+            event: "oauth.token.issued",
+            grantType,
+            requestId: context.requestId
+          },
+          "oauth token issued"
+        );
         return createJsonResponse(tokens, 200, corsHeaders({ "Cache-Control": "no-store" }));
       }
 
@@ -379,6 +553,16 @@ async function handleToken(
           body.scope ? body.scope.split(" ").filter(Boolean) : undefined,
           body.resource ? new URL(body.resource) : undefined
         );
+        runtime.logger.info(
+          {
+            clientId: client.client_id,
+            clientIp: context.clientIp,
+            event: "oauth.token.refreshed",
+            grantType,
+            requestId: context.requestId
+          },
+          "oauth token refreshed"
+        );
         return createJsonResponse(tokens, 200, corsHeaders({ "Cache-Control": "no-store" }));
       }
 
@@ -386,6 +570,15 @@ async function handleToken(
         throw new UnsupportedGrantTypeError("Unsupported grant type");
     }
   } catch (error) {
+    runtime.logger.warn(
+      {
+        clientIp: context.clientIp,
+        error: serializeError(error),
+        event: "oauth.token.failed",
+        requestId: context.requestId
+      },
+      "oauth token failed"
+    );
     if (error instanceof OAuthError) {
       return createOAuthErrorResponse(error, undefined, corsHeaders());
     }
@@ -397,14 +590,27 @@ async function handleToken(
 async function handleRevoke(
   runtime: Runtime,
   request: Request,
-  rateLimiter: RateLimiter
+  rateLimiter: RateLimiter,
+  context: RequestContext
 ): Promise<Response> {
   if (request.method !== "POST") {
     return createOAuthErrorResponse(new InvalidRequestError("Method not allowed"), 405, corsHeaders());
   }
 
   if (!rateLimiter.allow(requestKey(request, "revoke"), TOKEN_RATE_LIMIT)) {
-    return createOAuthErrorResponse(new InvalidRequestError("Rate limit exceeded"), 429, corsHeaders());
+    runtime.logger.warn(
+      {
+        clientIp: context.clientIp,
+        event: "oauth.revoke.throttled",
+        requestId: context.requestId
+      },
+      "oauth revoke throttled"
+    );
+    return createOAuthErrorResponse(
+      new TemporarilyUnavailableError("Too many token revocation attempts."),
+      429,
+      withRetryAfterHeaders(TOKEN_RATE_LIMIT, corsHeaders())
+    );
   }
 
   try {
@@ -416,11 +622,30 @@ async function handleRevoke(
       await runtime.oauthProvider.revokeToken(client, { token });
     }
 
+    runtime.logger.info(
+      {
+        clientId: client.client_id,
+        clientIp: context.clientIp,
+        event: "oauth.revoke.completed",
+        requestId: context.requestId
+      },
+      "oauth token revoked"
+    );
+
     return new Response(null, {
       headers: corsHeaders({ "Cache-Control": "no-store" }),
       status: 200
     });
   } catch (error) {
+    runtime.logger.warn(
+      {
+        clientIp: context.clientIp,
+        error: serializeError(error),
+        event: "oauth.revoke.failed",
+        requestId: context.requestId
+      },
+      "oauth revoke failed"
+    );
     if (error instanceof OAuthError) {
       return createOAuthErrorResponse(error, undefined, corsHeaders());
     }
@@ -432,16 +657,26 @@ async function handleRevoke(
 async function handleMcp(
   runtime: Runtime,
   request: Request,
-  rateLimiter: RateLimiter
+  rateLimiter: RateLimiter,
+  context: RequestContext
 ): Promise<Response> {
   if (!rateLimiter.allow(requestKey(request, "mcp"), MCP_RATE_LIMIT)) {
+    runtime.logger.warn(
+      {
+        clientIp: context.clientIp,
+        event: "mcp.throttled",
+        requestId: context.requestId
+      },
+      "mcp throttled"
+    );
     return createJsonResponse(
       {
         error: {
           message: "Rate limit exceeded."
         }
       },
-      429
+      429,
+      withRetryAfterHeaders(MCP_RATE_LIMIT)
     );
   }
 
@@ -464,18 +699,25 @@ async function handleMcp(
 }
 
 function handleSettings(runtime: Runtime, request: Request): Response {
-  const session = readSessionFromCookieHeader(
+  const sessionState = readSessionStateFromCookieHeader(
     request.headers.get("cookie") ?? undefined,
     runtime.config.oauth
   );
-  const csrf = ensureCsrfToken(request.headers.get("cookie") ?? undefined);
+  const session = sessionState.session;
   const headers = new Headers();
-  if (csrf.cookie) {
-    headers.append("Set-Cookie", buildCsrfCookie(runtime.config.oauth, csrf.cookie));
-  }
 
   if (!session) {
-    return createHtmlResponse(renderSessionRequiredPage("settings"), 401, headers);
+    appendSessionCleanupCookies(headers, runtime.config.oauth, sessionState.reason);
+    return createHtmlResponse(
+      renderSessionRequiredPage("settings", sessionState.reason),
+      401,
+      headers
+    );
+  }
+
+  const csrf = ensureCsrfToken(request.headers.get("cookie") ?? undefined);
+  if (csrf.cookie) {
+    headers.append("Set-Cookie", buildCsrfCookie(runtime.config.oauth, csrf.cookie));
   }
 
   return createHtmlResponse(
@@ -489,19 +731,31 @@ function handleSettings(runtime: Runtime, request: Request): Response {
   );
 }
 
-async function handleSettingsRotate(runtime: Runtime, request: Request): Promise<Response> {
-  const session = readSessionFromCookieHeader(
+async function handleSettingsRotate(
+  runtime: Runtime,
+  request: Request,
+  rateLimiter: RateLimiter,
+  context: RequestContext
+): Promise<Response> {
+  const sessionState = readSessionStateFromCookieHeader(
     request.headers.get("cookie") ?? undefined,
     runtime.config.oauth
   );
-  const csrf = ensureCsrfToken(request.headers.get("cookie") ?? undefined);
+  const session = sessionState.session;
   const headers = new Headers();
-  if (csrf.cookie) {
-    headers.append("Set-Cookie", buildCsrfCookie(runtime.config.oauth, csrf.cookie));
-  }
 
   if (!session) {
-    return createHtmlResponse(renderSessionRequiredPage("settings"), 401, headers);
+    appendSessionCleanupCookies(headers, runtime.config.oauth, sessionState.reason);
+    return createHtmlResponse(
+      renderSessionRequiredPage("settings", sessionState.reason),
+      401,
+      headers
+    );
+  }
+
+  const csrf = ensureCsrfToken(request.headers.get("cookie") ?? undefined);
+  if (csrf.cookie) {
+    headers.append("Set-Cookie", buildCsrfCookie(runtime.config.oauth, csrf.cookie));
   }
 
   const body = await parseFormBody(request);
@@ -532,10 +786,56 @@ async function handleSettingsRotate(runtime: Runtime, request: Request): Promise
     );
   }
 
+  if (
+    !rateLimiter.allow(
+      requestKey(request, "settings-rotate", String(session.userId)),
+      ED_TOKEN_ATTEMPT_RATE_LIMIT
+    )
+  ) {
+    runtime.logger.warn(
+      {
+        clientIp: context.clientIp,
+        event: "settings.rotate.throttled",
+        requestId: context.requestId,
+        userId: session.userId
+      },
+      "settings rotate throttled"
+    );
+    return createHtmlResponse(
+      renderSettingsPage({
+        csrfToken: csrf.token,
+        errorMessage: "Too many Ed token attempts. Wait a bit and try again.",
+        session,
+        status: runtime.credentials.getConnectionStatus(session.userId)
+      }),
+      429,
+      withRetryAfterHeaders(ED_TOKEN_ATTEMPT_RATE_LIMIT, headers)
+    );
+  }
+
   try {
     await runtime.credentials.connect(session.userId, edToken);
+    runtime.logger.info(
+      {
+        clientIp: context.clientIp,
+        event: "settings.rotate.succeeded",
+        requestId: context.requestId,
+        userId: session.userId
+      },
+      "settings rotate succeeded"
+    );
     return redirectResponse("/settings", headers);
   } catch (error) {
+    runtime.logger.warn(
+      {
+        clientIp: context.clientIp,
+        error: serializeError(error),
+        event: "settings.rotate.failed",
+        requestId: context.requestId,
+        userId: session.userId
+      },
+      "settings rotate failed"
+    );
     return createHtmlResponse(
       renderSettingsPage({
         csrfToken: csrf.token,
@@ -550,18 +850,25 @@ async function handleSettingsRotate(runtime: Runtime, request: Request): Promise
 }
 
 async function handleSettingsDelete(runtime: Runtime, request: Request): Promise<Response> {
-  const session = readSessionFromCookieHeader(
+  const sessionState = readSessionStateFromCookieHeader(
     request.headers.get("cookie") ?? undefined,
     runtime.config.oauth
   );
-  const csrf = ensureCsrfToken(request.headers.get("cookie") ?? undefined);
+  const session = sessionState.session;
   const headers = new Headers();
-  if (csrf.cookie) {
-    headers.append("Set-Cookie", buildCsrfCookie(runtime.config.oauth, csrf.cookie));
-  }
 
   if (!session) {
-    return createHtmlResponse(renderSessionRequiredPage("settings"), 401, headers);
+    appendSessionCleanupCookies(headers, runtime.config.oauth, sessionState.reason);
+    return createHtmlResponse(
+      renderSessionRequiredPage("settings", sessionState.reason),
+      401,
+      headers
+    );
+  }
+
+  const csrf = ensureCsrfToken(request.headers.get("cookie") ?? undefined);
+  if (csrf.cookie) {
+    headers.append("Set-Cookie", buildCsrfCookie(runtime.config.oauth, csrf.cookie));
   }
 
   const body = await parseFormBody(request);
@@ -587,18 +894,25 @@ async function handleSettingsDelete(runtime: Runtime, request: Request): Promise
 }
 
 function handleReconnect(runtime: Runtime, request: Request): Response {
-  const session = readSessionFromCookieHeader(
+  const sessionState = readSessionStateFromCookieHeader(
     request.headers.get("cookie") ?? undefined,
     runtime.config.oauth
   );
-  const csrf = ensureCsrfToken(request.headers.get("cookie") ?? undefined);
+  const session = sessionState.session;
   const headers = new Headers();
-  if (csrf.cookie) {
-    headers.append("Set-Cookie", buildCsrfCookie(runtime.config.oauth, csrf.cookie));
-  }
 
   if (!session) {
-    return createHtmlResponse(renderSessionRequiredPage("reconnect"), 401, headers);
+    appendSessionCleanupCookies(headers, runtime.config.oauth, sessionState.reason);
+    return createHtmlResponse(
+      renderSessionRequiredPage("reconnect", sessionState.reason),
+      401,
+      headers
+    );
+  }
+
+  const csrf = ensureCsrfToken(request.headers.get("cookie") ?? undefined);
+  if (csrf.cookie) {
+    headers.append("Set-Cookie", buildCsrfCookie(runtime.config.oauth, csrf.cookie));
   }
 
   return createHtmlResponse(
@@ -612,19 +926,31 @@ function handleReconnect(runtime: Runtime, request: Request): Response {
   );
 }
 
-async function handleReconnectSubmit(runtime: Runtime, request: Request): Promise<Response> {
-  const session = readSessionFromCookieHeader(
+async function handleReconnectSubmit(
+  runtime: Runtime,
+  request: Request,
+  rateLimiter: RateLimiter,
+  context: RequestContext
+): Promise<Response> {
+  const sessionState = readSessionStateFromCookieHeader(
     request.headers.get("cookie") ?? undefined,
     runtime.config.oauth
   );
-  const csrf = ensureCsrfToken(request.headers.get("cookie") ?? undefined);
+  const session = sessionState.session;
   const headers = new Headers();
-  if (csrf.cookie) {
-    headers.append("Set-Cookie", buildCsrfCookie(runtime.config.oauth, csrf.cookie));
-  }
 
   if (!session) {
-    return createHtmlResponse(renderSessionRequiredPage("reconnect"), 401, headers);
+    appendSessionCleanupCookies(headers, runtime.config.oauth, sessionState.reason);
+    return createHtmlResponse(
+      renderSessionRequiredPage("reconnect", sessionState.reason),
+      401,
+      headers
+    );
+  }
+
+  const csrf = ensureCsrfToken(request.headers.get("cookie") ?? undefined);
+  if (csrf.cookie) {
+    headers.append("Set-Cookie", buildCsrfCookie(runtime.config.oauth, csrf.cookie));
   }
 
   const body = await parseFormBody(request);
@@ -655,10 +981,56 @@ async function handleReconnectSubmit(runtime: Runtime, request: Request): Promis
     );
   }
 
+  if (
+    !rateLimiter.allow(
+      requestKey(request, "reconnect", String(session.userId)),
+      ED_TOKEN_ATTEMPT_RATE_LIMIT
+    )
+  ) {
+    runtime.logger.warn(
+      {
+        clientIp: context.clientIp,
+        event: "reconnect.throttled",
+        requestId: context.requestId,
+        userId: session.userId
+      },
+      "reconnect throttled"
+    );
+    return createHtmlResponse(
+      renderReconnectPage({
+        csrfToken: csrf.token,
+        errorMessage: "Too many Ed token attempts. Wait a bit and try again.",
+        session,
+        status: runtime.credentials.getConnectionStatus(session.userId)
+      }),
+      429,
+      withRetryAfterHeaders(ED_TOKEN_ATTEMPT_RATE_LIMIT, headers)
+    );
+  }
+
   try {
     await runtime.credentials.connect(session.userId, edToken);
+    runtime.logger.info(
+      {
+        clientIp: context.clientIp,
+        event: "reconnect.succeeded",
+        requestId: context.requestId,
+        userId: session.userId
+      },
+      "reconnect succeeded"
+    );
     return redirectResponse("/settings", headers);
   } catch (error) {
+    runtime.logger.warn(
+      {
+        clientIp: context.clientIp,
+        error: serializeError(error),
+        event: "reconnect.failed",
+        requestId: context.requestId,
+        userId: session.userId
+      },
+      "reconnect failed"
+    );
     return createHtmlResponse(
       renderReconnectPage({
         csrfToken: csrf.token,
@@ -678,7 +1050,7 @@ async function authenticateBearerRequest(
 ): Promise<AuthInfo | Response> {
   const authorization = request.headers.get("authorization");
   if (!authorization?.startsWith("Bearer ")) {
-    return unauthorizedResponse(runtime, "Bearer token is required.");
+    return unauthorizedResponse(runtime, "Bearer token is required.", "invalid_token");
   }
 
   try {
@@ -692,7 +1064,8 @@ async function authenticateBearerRequest(
   } catch (error) {
     return unauthorizedResponse(
       runtime,
-      error instanceof Error ? error.message : "Invalid bearer token."
+      error instanceof Error ? error.message : "Invalid bearer token.",
+      "invalid_token"
     );
   }
 }
@@ -804,6 +1177,21 @@ function createHtmlResponse(
   if (!resolvedHeaders.has("Content-Type")) {
     resolvedHeaders.set("Content-Type", "text/html; charset=utf-8");
   }
+  if (!resolvedHeaders.has("Cache-Control")) {
+    resolvedHeaders.set("Cache-Control", "no-store");
+  }
+  if (!resolvedHeaders.has("Content-Security-Policy")) {
+    resolvedHeaders.set(
+      "Content-Security-Policy",
+      "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+    );
+  }
+  if (!resolvedHeaders.has("Referrer-Policy")) {
+    resolvedHeaders.set("Referrer-Policy", "no-referrer");
+  }
+  if (!resolvedHeaders.has("X-Frame-Options")) {
+    resolvedHeaders.set("X-Frame-Options", "DENY");
+  }
 
   return new Response(html, {
     headers: resolvedHeaders,
@@ -813,6 +1201,7 @@ function createHtmlResponse(
 
 function redirectResponse(location: string, headers?: Headers): Response {
   const resolvedHeaders = headers ?? new Headers();
+  resolvedHeaders.set("Cache-Control", "no-store");
   resolvedHeaders.set("Location", location);
   return new Response(null, {
     headers: resolvedHeaders,
@@ -850,7 +1239,11 @@ function createOAuthErrorResponse(
   );
 }
 
-function unauthorizedResponse(runtime: Runtime, message: string): Response {
+function unauthorizedResponse(
+  runtime: Runtime,
+  message: string,
+  errorCode: "invalid_token" | "invalid_request"
+): Response {
   return createJsonResponse(
     {
       error: "unauthorized",
@@ -858,7 +1251,10 @@ function unauthorizedResponse(runtime: Runtime, message: string): Response {
     },
     401,
     {
-      "WWW-Authenticate": `Bearer resource_metadata="${getOAuthProtectedResourceMetadataUrl(
+      "Cache-Control": "no-store",
+      "WWW-Authenticate": `Bearer error="${errorCode}", error_description="${escapeAttribute(
+        message
+      )}", resource_metadata="${getOAuthProtectedResourceMetadataUrl(
         runtime.config.oauth.mcpServerUrl
       )}"`
     }
@@ -871,16 +1267,19 @@ function forbiddenResponse(message: string): Response {
       error: "insufficient_scope",
       error_description: message
     },
-    403
+    403,
+    {
+      "Cache-Control": "no-store"
+    }
   );
 }
 
-function requestKey(request: Request, namespace: string): string {
-  const forwardedFor =
-    request.headers.get("x-forwarded-for") ??
-    request.headers.get("x-real-ip") ??
-    "anonymous";
-  return `${namespace}:${forwardedFor}`;
+function requestKey(request: Request, namespace: string, subject?: string): string {
+  const keyParts = [namespace, getClientIp(request)];
+  if (subject) {
+    keyParts.push(subject);
+  }
+  return keyParts.join(":");
 }
 
 type RateLimitConfig = {
@@ -909,6 +1308,15 @@ function createRateLimiter(): RateLimiter {
       return true;
     }
   };
+}
+
+function withRetryAfterHeaders(
+  config: RateLimitConfig,
+  headers: HeadersInit = new Headers()
+): Headers {
+  const resolvedHeaders = new Headers(headers);
+  resolvedHeaders.set("Retry-After", String(Math.ceil(config.windowMs / 1000)));
+  return resolvedHeaders;
 }
 
 function isCorsPath(pathname: string, runtime: Runtime): boolean {
@@ -947,14 +1355,134 @@ function serializeError(error: unknown): Record<string, unknown> {
   };
 }
 
-function renderSessionRequiredPage(kind: "settings" | "reconnect"): string {
+function getClientIp(request: Request): string {
+  const forwardedFor = request.headers.get("x-forwarded-for");
+  if (forwardedFor) {
+    const first = forwardedFor.split(",")[0]?.trim();
+    if (first) {
+      return first;
+    }
+  }
+
+  const realIp = request.headers.get("x-real-ip")?.trim();
+  return realIp || "anonymous";
+}
+
+function parseRequestedScopes(
+  scope: string | undefined,
+  config: Runtime["config"]
+): string[] {
+  return scope?.split(" ").filter(Boolean) || [config.oauth.readScope];
+}
+
+function getAuthorizeTab(value: string | undefined): "signin" | "signup" {
+  return value === "signup" ? "signup" : "signin";
+}
+
+function getAuthorizeAttemptRateLimit(form: Record<string, string>): RateLimitConfig {
+  return getAuthorizeTab(form.tab) === "signup"
+    ? SIGNUP_ATTEMPT_RATE_LIMIT
+    : SIGNIN_ATTEMPT_RATE_LIMIT;
+}
+
+function buildAuthorizeAttemptKey(
+  request: Request,
+  form: Record<string, string>,
+  session: { email: string; userId: number } | null
+): string {
+  const tab = getAuthorizeTab(form.tab);
+  if (tab === "signup") {
+    return requestKey(request, "authorize-signup", normalizeRateLimitIdentity(form.signup_email));
+  }
+
+  const identity = form.signin_email || session?.email || String(session?.userId || "");
+  return requestKey(request, "authorize-signin", normalizeRateLimitIdentity(identity));
+}
+
+function normalizeRateLimitIdentity(value: string | undefined): string {
+  const trimmed = value?.trim().toLowerCase();
+  return trimmed || "anonymous";
+}
+
+function createAuthorizeRateLimitResponse(
+  runtime: Runtime,
+  client: OAuthClientInformationFull,
+  params: {
+    codeChallenge: string;
+    redirectUri: string;
+    resource?: URL;
+    scopes: string[];
+    state?: string;
+  },
+  form: Record<string, string> | undefined,
+  sessionState: {
+    reason: "missing" | "expired" | "invalid" | "valid";
+    session: { displayName: string; email: string } | null;
+  },
+  cookieHeader: string | undefined,
+  rateLimit: RateLimitConfig
+): Response {
+  const headers = withRetryAfterHeaders(rateLimit);
+  if (sessionState.reason === "expired" || sessionState.reason === "invalid") {
+    headers.append("Set-Cookie", buildExpiredSessionCookie(runtime.config.oauth));
+  }
+  const csrf = ensureCsrfToken(cookieHeader);
+  if (csrf.cookie) {
+    headers.append("Set-Cookie", buildCsrfCookie(runtime.config.oauth, csrf.cookie));
+  }
+
+  return createHtmlResponse(
+    renderAuthorizeHtml(client, {
+      csrfToken: csrf.token,
+      edTokenHint:
+        sessionState.reason === "valid"
+          ? "Leave this blank if your existing Ed connection is still valid."
+          : "Paste your Ed API token here.",
+      errorMessage: "Too many attempts. Wait a bit and try again.",
+      params,
+      requestedScopes: params.scopes,
+      selectedTab: getAuthorizeTab(form?.tab),
+      session: sessionState.reason === "valid" ? sessionState.session ?? undefined : undefined,
+      showEdToken: sessionState.reason !== "valid",
+      signInEmail: form?.signin_email,
+      signUpDisplayName: form?.signup_display_name,
+      signUpEmail: form?.signup_email
+    }),
+    429,
+    headers
+  );
+}
+
+function appendSessionCleanupCookies(
+  headers: Headers,
+  config: Runtime["config"]["oauth"],
+  reason: "missing" | "expired" | "invalid"
+): void {
+  if (reason === "missing") {
+    return;
+  }
+
+  headers.append("Set-Cookie", buildExpiredSessionCookie(config));
+  headers.append("Set-Cookie", buildExpiredCsrfCookie(config));
+}
+
+function renderSessionRequiredPage(
+  kind: "settings" | "reconnect",
+  reason: "missing" | "expired" | "invalid"
+): string {
+  const detail =
+    reason === "expired"
+      ? "Your browser session expired. Start a fresh OAuth sign-in, then come back."
+      : reason === "invalid"
+        ? "Your browser session is no longer valid. Start a fresh OAuth sign-in, then come back."
+        : "Open this page from a browser session that already authorized EdStem MCP.";
   return `<!doctype html>
 <html lang="en">
   <head><meta charset="utf-8"><title>EdStem MCP</title></head>
   <body>
     <main>
       <h1>Sign in first</h1>
-      <p>Open this page from a browser session that already authorized EdStem MCP.</p>
+      <p>${escapeHtml(detail)}</p>
       <p>Then return to <code>${escapeHtml(kind)}</code>.</p>
     </main>
   </body>
@@ -1044,4 +1572,8 @@ function escapeHtml(value: string): string {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function escapeAttribute(value: string): string {
+  return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
 }

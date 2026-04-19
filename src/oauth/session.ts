@@ -10,6 +10,20 @@ export interface SessionPayload {
   userId: number;
 }
 
+export type SessionState =
+  | {
+      reason: "missing";
+      session: null;
+    }
+  | {
+      reason: "expired" | "invalid";
+      session: null;
+    }
+  | {
+      reason: "valid";
+      session: SessionPayload;
+    };
+
 export function buildExpiredSessionCookie(config: OAuthConfig): string {
   const parts = [
     `${config.sessionCookieName}=`,
@@ -63,17 +77,42 @@ export function readSessionFromCookieHeader(
   config: OAuthConfig,
   now: Date = new Date()
 ): SessionPayload | null {
+  const state = readSessionStateFromCookieHeader(cookieHeader, config, now);
+  return state.session;
+}
+
+export function readSessionStateFromCookieHeader(
+  cookieHeader: string | undefined,
+  config: OAuthConfig,
+  now: Date = new Date()
+): SessionState {
   const raw = parseCookies(cookieHeader).get(config.sessionCookieName);
   if (!raw) {
-    return null;
+    return {
+      reason: "missing",
+      session: null
+    };
   }
 
   const payload = decodePayload(raw, config.sessionSecret);
-  if (!payload || payload.expiresAt <= now.getTime()) {
-    return null;
+  if (!payload) {
+    return {
+      reason: "invalid",
+      session: null
+    };
   }
 
-  return payload;
+  if (payload.expiresAt <= now.getTime()) {
+    return {
+      reason: "expired",
+      session: null
+    };
+  }
+
+  return {
+    reason: "valid",
+    session: payload
+  };
 }
 
 function parseCookies(cookieHeader: string | undefined): Map<string, string> {

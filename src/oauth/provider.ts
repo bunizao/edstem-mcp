@@ -24,13 +24,14 @@ import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import type { AppConfig, OAuthConfig } from "../config.js";
 import { CredentialsService, EdNotConnectedError, EdReconnectRequiredError } from "../credentials/service.js";
 import { EdApiBaseUrlError, EdTokenInvalidError } from "../credentials/verifier.js";
+import type { Logger } from "../logger.js";
 import { UsersService, DuplicateEmailError, InvalidCredentialsError, PasswordPolicyError } from "../users/service.js";
 import { renderAuthorizePage as renderAuthorizeHtml } from "./login-page.js";
 import type { AuthorizeResponse } from "./http.js";
 import {
   buildSessionCookie,
   createSessionForUser,
-  readSessionFromCookieHeader
+  readSessionStateFromCookieHeader
 } from "./session.js";
 import {
   buildCsrfCookie,
@@ -71,6 +72,7 @@ export class EdstemOAuthProvider {
   readonly skipLocalPkceValidation = false;
   private readonly config: OAuthConfig;
   private readonly credentials: CredentialsService;
+  private readonly logger: Logger;
   private readonly resourceUrl: URL;
   private readonly store: SqlOAuthStore;
   private readonly users: UsersService;
@@ -78,11 +80,13 @@ export class EdstemOAuthProvider {
   constructor(dependencies: {
     config: AppConfig;
     credentials: CredentialsService;
+    logger: Logger;
     store: SqlOAuthStore;
     users: UsersService;
   }) {
     this.config = dependencies.config.oauth;
     this.credentials = dependencies.credentials;
+    this.logger = dependencies.logger;
     this.resourceUrl = resourceUrlFromServerUrl(this.config.mcpServerUrl);
     this.store = dependencies.store;
     this.users = dependencies.users;
@@ -95,7 +99,8 @@ export class EdstemOAuthProvider {
     res: AuthorizeResponse
   ): Promise<void> {
     const request = res.req;
-    const session = readSessionFromCookieHeader(request.headers.cookie, this.config);
+    const sessionState = readSessionStateFromCookieHeader(request.headers.cookie, this.config);
+    const session = sessionState.session;
     const requestedScopes = normalizeRequestedScopes(params.scopes, this.config);
     const csrf = ensureCsrfToken(request.headers.cookie);
 
@@ -149,18 +154,42 @@ export class EdstemOAuthProvider {
       const result = await this.handleAuthorizationPost(request.body, requestedScopes, session);
       const nextSession = result.user;
       res.appendHeader("Set-Cookie", buildSessionCookie(nextSession, this.config));
+      this.logger.info(
+        {
+          clientId: client.client_id,
+          event: "oauth.authorize.approved",
+          grantedScopes: result.grantedScopes,
+          requestedScopes,
+          userId: nextSession.userId
+        },
+        "oauth authorize approved"
+      );
       await this.finishAuthorization(client, params, nextSession, result.grantedScopes, res);
     } catch (error) {
       const message = mapAuthorizeErrorMessage(error);
       const selectedTab = getTab(request.body?.tab);
+      const statusCode = mapAuthorizeStatusCode(error);
 
-      res.status(mapAuthorizeStatusCode(error)).type("html").send(
+      this.logger.warn(
+        {
+          clientId: client.client_id,
+          errorCode: mapAuthorizeAuditReason(error),
+          event: "oauth.authorize.denied",
+          requestedScopes,
+          statusCode,
+          tab: selectedTab,
+          userId: session?.userId
+        },
+        "oauth authorize denied"
+      );
+
+      res.status(statusCode).type("html").send(
         renderAuthorizePage(
           client,
           params,
           requestedScopes,
           csrf.token,
-          session,
+          sessionState.reason === "valid" ? session : null,
           {
             edTokenHint: mapEdTokenHint(error, session),
             errorMessage: message,
@@ -608,4 +637,35 @@ function shouldShowEdToken(
     return true;
   }
   return !session;
+}
+
+function mapAuthorizeAuditReason(error: unknown): string {
+  if (error instanceof DuplicateEmailError) {
+    return "duplicate_email";
+  }
+  if (error instanceof InvalidCredentialsError) {
+    return "invalid_credentials";
+  }
+  if (error instanceof PasswordPolicyError) {
+    return "password_policy";
+  }
+  if (error instanceof EdTokenInvalidError) {
+    return "invalid_ed_token";
+  }
+  if (error instanceof EdApiBaseUrlError) {
+    return "invalid_api_base_url";
+  }
+  if (error instanceof EdNotConnectedError) {
+    return "ed_not_connected";
+  }
+  if (error instanceof EdReconnectRequiredError) {
+    return "ed_reconnect_required";
+  }
+  if (error instanceof AccessDeniedError) {
+    return "access_denied";
+  }
+  if (error instanceof Error) {
+    return error.name;
+  }
+  return "unknown_error";
 }

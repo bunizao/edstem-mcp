@@ -57,6 +57,24 @@ export class BunAuthorizeResponse implements AuthorizeResponse {
   }
 
   toResponse(): Response {
+    if (this.headers.get("Content-Type")?.startsWith("text/html")) {
+      if (!this.headers.has("Cache-Control")) {
+        this.headers.set("Cache-Control", "no-store");
+      }
+      if (!this.headers.has("Content-Security-Policy")) {
+        this.headers.set(
+          "Content-Security-Policy",
+          "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+        );
+      }
+      if (!this.headers.has("Referrer-Policy")) {
+        this.headers.set("Referrer-Policy", "no-referrer");
+      }
+      if (!this.headers.has("X-Frame-Options")) {
+        this.headers.set("X-Frame-Options", "DENY");
+      }
+    }
+
     return new Response(this.body, {
       headers: this.headers,
       status: this.statusCode
@@ -64,7 +82,10 @@ export class BunAuthorizeResponse implements AuthorizeResponse {
   }
 
   type(contentType: string): AuthorizeResponse {
-    this.headers.set("Content-Type", contentType);
+    this.headers.set(
+      "Content-Type",
+      contentType === "html" ? "text/html; charset=utf-8" : contentType
+    );
     return this;
   }
 }
