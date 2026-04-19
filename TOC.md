@@ -53,7 +53,9 @@ Unless the operator explicitly states otherwise, the Service is independent from
 | Browser session cookie | The Service | Keeps the browser authorization or settings session alive | Stored in your browser as a signed cookie and recognized by the Service | Browser session and Local account |
 | CSRF token | The Service | Prevents cross-site request forgery on browser forms | Stored in your browser as a security cookie and form value | Browser session |
 
-Important: the Ed token and the Service OAuth tokens are different credentials for different systems. Your MCP client receives Service OAuth tokens. It does not need your raw Ed token to call the Service, and the Service is not supposed to pass your Ed token through to the MCP client.
+Important: the Ed token and the Service OAuth tokens are different credentials for different systems. Your MCP client receives Service OAuth tokens. It does not need your raw Ed token to call the Service, and the Service is not designed to pass your Ed token through to the MCP client.
+
+Current implementation detail: Service OAuth access tokens and refresh tokens are stored in the local database by token value, together with client, user, scope, and expiry metadata, so the Service can validate, refresh, revoke, prune, and delete them.
 
 ## 5. How the Service Handles Your Ed Token
 
@@ -108,7 +110,7 @@ The operator may use the data above to:
 - maintain backups, restore the database after failures, and investigate incidents;
 - comply with applicable law, lawful requests, or good-faith security obligations.
 
-The Service is not supposed to sell your Ed token. The Service is also not supposed to use your Ed token for unrelated advertising, profiling, or data brokerage.
+The Service is not intended to sell your Ed token. The Service is also not intended to use your Ed token for unrelated advertising, profiling, or data brokerage.
 
 Automated decision-making in this Service is limited to operational checks such as token verification, scope enforcement, rate limiting, expiry handling, invalidation, and security controls.
 
@@ -138,7 +140,7 @@ In practical terms:
 
 You may also revoke or regenerate your Ed token directly through Ed Discussion. Doing that may immediately or eventually break the Service connection until you reconnect with a fresh token.
 
-If the Service provides a local account deletion flow, the Service is intended to remove the Local account, the encrypted Ed credential, the current browser session, and associated Service-issued OAuth records in the live database. Existing backups may survive longer.
+The Service currently provides a local account deletion flow. That flow is intended to remove the Local account, the encrypted Ed credential, the current browser session, and associated Service-issued OAuth records in the live database. Existing backups may survive longer.
 
 ## 11. Security Measures and Security Limits
 
@@ -226,7 +228,7 @@ The operator does not guarantee:
 - that every write action will succeed, be reversible, or be suitable for your use case;
 - that the Service will prevent every security incident, data loss event, or misuse by a client you authorized.
 
-The Service is a bridge, not a promise that the world behaves.
+The Service is a bridge, not a guarantee of third-party behavior or uninterrupted infrastructure.
 
 ## 17. Limitation of Liability
 
