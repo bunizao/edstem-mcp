@@ -1,18 +1,6 @@
 services:
   app:
     build: .
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "bun",
-          "-e",
-          "fetch('http://127.0.0.1:8787/readyz').then((response) => { if (!response.ok) throw new Error(String(response.status)); })"
-        ]
-      interval: 30s
-      retries: 5
-      start_period: 10s
-      timeout: 5s
     init: true
     restart: unless-stopped
     environment:
@@ -23,7 +11,7 @@ services:
       PORT: 8787
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
     ports:
-      - "${APP_PORT:-8787}:8787"
+      - "8787:8787"
     volumes:
       - app_data:/data
 

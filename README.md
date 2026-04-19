@@ -70,15 +70,15 @@ docker compose up -d --build
 ```
 
 The compose file publishes the app directly on `8787` by default.
-It also ships with a `readyz` health check, init process, and periodic OAuth cleanup.
+The image ships with a `readyz` health check, and the compose file stays thin.
 
 Useful overrides:
 
-- `APP_PORT=9000` to bind another host port
 - `PUBLIC_BASE_URL=http://your-host:9000` to make OAuth metadata point at the real public URL
 - `DB_CLEANUP_INTERVAL_SECONDS=300` to prune expired OAuth rows every 5 minutes
 
 `PUBLIC_BASE_URL` is intentionally explicit. It should match the real external URL clients use, instead of being guessed from the host port mapping.
+If you want a different published port, edit [docker-compose.yml](/Users/tutu/Library/CloudStorage/Dropbox/Dev/edstem-mcp/docker-compose.yml) directly or use a compose override file.
 
 No reverse proxy is included. If you want TLS later, put one in front yourself.
 
