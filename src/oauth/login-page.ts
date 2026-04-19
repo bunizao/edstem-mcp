@@ -3,6 +3,7 @@ import type { OAuthClientInformationFull } from "@modelcontextprotocol/sdk/share
 
 const REPOSITORY_URL = "https://github.com/bunizao/edstem-mcp";
 const TOC_URL = `${REPOSITORY_URL}/blob/master/TOC.md`;
+const TOC_LABEL = "Terms of Connection and Token Handling";
 
 export interface RenderAuthorizePageOptions {
   csrfToken: string;
@@ -26,9 +27,7 @@ export function renderAuthorizePage(
   const tokenPlaceholder = options.showEdToken
     ? "Paste your Ed API token…"
     : "Leave blank to reuse this session…";
-  const edSettingsLabel = options.showEdToken
-    ? "Open Ed Settings to create or copy a token"
-    : "Open Ed Settings";
+  const edSettingsLabel = "Open Ed Settings";
 
   return `<!doctype html>
 <html lang="en">
@@ -429,7 +428,7 @@ export function renderAuthorizePage(
 
             <label class="consent-row" for="accept_toc">
               <input id="accept_toc" name="accept_toc" type="checkbox" value="1" required>
-              <span class="consent-copy">I agree to the <a href="${TOC_URL}" target="_blank" rel="noreferrer">ToC</a>.</span>
+              <span class="consent-copy">I agree to the <a href="${TOC_URL}" target="_blank" rel="noreferrer">${TOC_LABEL}</a>.</span>
             </label>
 
             <button class="button" type="submit">${escapeHtml(actionLabel)}</button>
@@ -441,7 +440,7 @@ export function renderAuthorizePage(
             <span><strong>Client</strong> ${escapeHtml(clientName)}</span>
             <span><strong>Scopes</strong> <span class="mono" translate="no">${escapeHtml(options.requestedScopes.join(" "))}</span></span>
             <span><a class="link" href="${REPOSITORY_URL}" target="_blank" rel="noreferrer">GitHub</a></span>
-            <span><a class="link" href="${TOC_URL}" target="_blank" rel="noreferrer">ToC</a></span>
+            <span><a class="link" href="${TOC_URL}" target="_blank" rel="noreferrer">${TOC_LABEL}</a></span>
           </div>
         </div>
       </section>

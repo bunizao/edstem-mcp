@@ -53,7 +53,7 @@ const AUTHORIZATION_CODE_TTL_MS = 10 * 60 * 1000;
 
 class TocConsentRequiredError extends Error {
   constructor() {
-    super("You must agree to the ToC before continuing.");
+    super("You must agree to the Terms of Connection and Token Handling before continuing.");
     this.name = "TocConsentRequiredError";
   }
 }

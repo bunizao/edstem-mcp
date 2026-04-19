@@ -224,6 +224,6 @@ describe("oauth authorize flow", () => {
     });
 
     expect(response.status).toBe(422);
-    expect(await response.text()).toContain("agree to the ToC");
+    expect(await response.text()).toContain("Terms of Connection and Token Handling");
   });
 });
