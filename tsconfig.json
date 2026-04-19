@@ -10,7 +10,7 @@
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "types": ["bun-types", "node"],
+    "types": ["bun-types"],
     "lib": ["ESNext", "DOM"]
   },
   "include": ["src/**/*.ts", "test/**/*.ts"]

@@ -101,7 +101,9 @@ export interface AppConfig {
   publicBaseUrl: URL;
 }
 
-export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
+export function loadConfig(
+  env: Record<string, string | undefined> = process.env
+): AppConfig {
   const port = parsePort(env.PORT);
   const mcpPath = normalizePath(env.MCP_PATH, "/mcp");
   const publicBaseUrl = parseUrl(env.PUBLIC_BASE_URL, `http://localhost:${port}`);

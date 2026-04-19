@@ -74,7 +74,8 @@ describe("oauth sql store", () => {
     });
     expect(runtime.store.getAccessToken("access-1")?.refreshToken).toBe("refresh-1");
 
-    runtime.store.pruneExpired(Date.now() + 2_000);
+    const summary = runtime.store.pruneExpired(Date.now() + 2_000);
+    expect(summary.totalDeleted).toBe(3);
     expect(runtime.store.getAuthorizationCode("code-1")).toBeUndefined();
     expect(runtime.store.getRefreshToken("refresh-1")).toBeUndefined();
     expect(runtime.store.getAccessToken("access-1")).toBeUndefined();

@@ -53,5 +53,7 @@ function resolveMigrationsDir(): string {
     }
   }
 
-  return candidates[0]!;
+  throw new Error(
+    `Database migrations directory not found. Checked: ${candidates.join(", ")}`
+  );
 }
