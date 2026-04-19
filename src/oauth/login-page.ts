@@ -1,6 +1,9 @@
 import type { AuthorizationParams } from "@modelcontextprotocol/sdk/server/auth/provider.js";
 import type { OAuthClientInformationFull } from "@modelcontextprotocol/sdk/shared/auth.js";
 
+const REPOSITORY_URL = "https://github.com/bunizao/edstem-mcp";
+const TOC_URL = `${REPOSITORY_URL}/blob/master/TOC.md`;
+
 export interface RenderAuthorizePageOptions {
   csrfToken: string;
   edTokenHint: string;
@@ -23,6 +26,9 @@ export function renderAuthorizePage(
   const tokenPlaceholder = options.showEdToken
     ? "Paste your Ed API token…"
     : "Leave blank to reuse this session…";
+  const edSettingsLabel = options.showEdToken
+    ? "Open Ed Settings to create or copy a token"
+    : "Open Ed Settings";
 
   return `<!doctype html>
 <html lang="en">
@@ -224,6 +230,18 @@ export function renderAuthorizePage(
         text-decoration: none;
         touch-action: manipulation;
       }
+      .link-strong {
+        display: inline-flex;
+        align-items: center;
+        min-height: 2.5rem;
+        border: 1px solid var(--border);
+        border-radius: calc(var(--radius) - 0.125rem);
+        padding: 0 0.875rem;
+        color: var(--foreground);
+        font-size: 0.9rem;
+        font-weight: 600;
+        line-height: 1;
+      }
       .link:hover {
         color: var(--foreground);
       }
@@ -263,6 +281,28 @@ export function renderAuthorizePage(
         color: var(--muted);
         font-size: 0.88rem;
         line-height: 1.5;
+      }
+      .consent-row {
+        display: flex;
+        gap: 0.75rem;
+        align-items: flex-start;
+      }
+      .consent-row input[type="checkbox"] {
+        margin: 0.125rem 0 0;
+        accent-color: var(--foreground);
+      }
+      .consent-copy {
+        color: var(--muted);
+        font-size: 0.9rem;
+        line-height: 1.55;
+      }
+      .consent-copy a {
+        color: var(--foreground);
+        font-weight: 600;
+        text-decoration: none;
+      }
+      .consent-copy a:hover {
+        text-decoration: underline;
       }
       .button {
         width: 100%;
@@ -325,7 +365,7 @@ export function renderAuthorizePage(
         <div class="card-header">
           <div class="eyebrow" translate="no">EdStem MCP</div>
           <h1 id="auth-title">Connect Your Ed Account</h1>
-          <p class="description">Authorize this MCP client with your Ed API token. No email or password is required.</p>
+          <p class="description">Paste your Ed API token to continue.</p>
           ${options.session ? `
             <div class="session-chip">
               <strong>Current Browser Session</strong>
@@ -359,10 +399,10 @@ export function renderAuthorizePage(
                 placeholder="${escapeHtml(tokenPlaceholder)}"
                 ${options.showEdToken ? "required" : ""}
               >
-              <p class="hint">${escapeHtml(options.edTokenHint)}</p>
+              ${options.edTokenHint ? `<p class="hint">${escapeHtml(options.edTokenHint)}</p>` : ""}
             </div>
 
-            <a class="link" href="https://edstem.org/settings/api-tokens" target="_blank" rel="noreferrer">Open Ed API Token Settings</a>
+            <a class="link link-strong" href="https://edstem.org/settings/api-tokens" target="_blank" rel="noreferrer">${escapeHtml(edSettingsLabel)}</a>
 
             <div class="separator" aria-hidden="true"></div>
 
@@ -387,6 +427,11 @@ export function renderAuthorizePage(
               </div>
             </div>
 
+            <label class="consent-row" for="accept_toc">
+              <input id="accept_toc" name="accept_toc" type="checkbox" value="1" required>
+              <span class="consent-copy">I agree to the <a href="${TOC_URL}" target="_blank" rel="noreferrer">ToC</a>.</span>
+            </label>
+
             <button class="button" type="submit">${escapeHtml(actionLabel)}</button>
           </form>
         </div>
@@ -395,8 +440,9 @@ export function renderAuthorizePage(
           <div class="meta-inline">
             <span><strong>Client</strong> ${escapeHtml(clientName)}</span>
             <span><strong>Scopes</strong> <span class="mono" translate="no">${escapeHtml(options.requestedScopes.join(" "))}</span></span>
+            <span><a class="link" href="${REPOSITORY_URL}" target="_blank" rel="noreferrer">GitHub</a></span>
+            <span><a class="link" href="${TOC_URL}" target="_blank" rel="noreferrer">ToC</a></span>
           </div>
-          <p class="footnote">No country code needed. This uses the same token flow as <span class="nowrap" translate="no">edstem-cli</span>.</p>
         </div>
       </section>
     </main>

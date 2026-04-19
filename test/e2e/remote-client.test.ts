@@ -214,6 +214,7 @@ async function authorizeOAuthClient(
   const body = new URLSearchParams(authorizationUrl.searchParams);
   body.set("csrf_token", csrfToken);
   body.set("ed_token", credentials.edToken);
+  body.set("accept_toc", "1");
   body.set("scope_read", "1");
   body.set("scope_write", "1");
 

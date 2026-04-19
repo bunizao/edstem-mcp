@@ -84,6 +84,7 @@ describe("oauth authorize flow", () => {
         redirect_uri: TEST_CLIENT.redirect_uris[0]!,
         response_type: "code",
         scope: "mcp:tools.read mcp:tools.write",
+        accept_toc: "1",
         scope_read: "1",
         scope_write: "1"
       }),
@@ -150,6 +151,7 @@ describe("oauth authorize flow", () => {
         redirect_uri: TEST_CLIENT.redirect_uris[0]!,
         response_type: "code",
         scope: "mcp:tools.read",
+        accept_toc: "1",
         scope_read: "1"
       }),
       headers: {
@@ -161,5 +163,67 @@ describe("oauth authorize flow", () => {
     expect(response.status).toBe(422);
 
     expect(runtime.users.findByEmail("ada@example.com")).toBeNull();
+  });
+
+  it("requires ToC consent before issuing authorization", async () => {
+    const fakeEd = await startFakeEdServer([
+      {
+        courses: [],
+        token: "ed-token-a",
+        user: {
+          avatar: "",
+          course_role: "student",
+          email: "ada@example.com",
+          id: 101,
+          name: "Ada",
+          role: "student"
+        }
+      }
+    ]);
+    cleanups.push(fakeEd.close);
+
+    const { runtime, cleanup } = await createTestRuntime({
+      apiBaseUrl: fakeEd.baseUrl
+    });
+    cleanups.push(cleanup);
+    runtime.store.saveClient(TEST_CLIENT);
+
+    const app = await startAppServer(runtime);
+    cleanups.push(async () => app.close());
+
+    const page = await fetch(
+      `${app.baseUrl}/authorize?${new URLSearchParams({
+        client_id: TEST_CLIENT.client_id,
+        code_challenge: "challenge",
+        code_challenge_method: "S256",
+        redirect_uri: TEST_CLIENT.redirect_uris[0]!,
+        response_type: "code",
+        scope: "mcp:tools.read"
+      })}`
+    );
+    expect(page.status).toBe(200);
+
+    const csrfToken = extractCsrfToken(await page.text());
+    const response = await fetch(`${app.baseUrl}/authorize`, {
+      body: new URLSearchParams({
+        client_id: TEST_CLIENT.client_id,
+        code_challenge: "challenge",
+        code_challenge_method: "S256",
+        csrf_token: csrfToken,
+        ed_token: "ed-token-a",
+        redirect_uri: TEST_CLIENT.redirect_uris[0]!,
+        response_type: "code",
+        scope: "mcp:tools.read",
+        scope_read: "1"
+      }),
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Cookie: page.headers.get("set-cookie") ?? ""
+      },
+      method: "POST"
+    });
+
+    expect(response.status).toBe(422);
+    expect(await response.text()).toContain("agree to the ToC");
   });
 });

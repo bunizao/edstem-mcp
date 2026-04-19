@@ -51,6 +51,13 @@ import {
 
 const AUTHORIZATION_CODE_TTL_MS = 10 * 60 * 1000;
 
+class TocConsentRequiredError extends Error {
+  constructor() {
+    super("You must agree to the ToC before continuing.");
+    this.name = "TocConsentRequiredError";
+  }
+}
+
 export class SqlOAuthClientsStore implements OAuthRegisteredClientsStore {
   constructor(private readonly store: SqlOAuthStore) {}
 
@@ -127,9 +134,7 @@ export class EdstemOAuthProvider {
             csrf.token,
             session,
             {
-              edTokenHint: canReuseSession
-                ? "Leave this blank to reuse your current browser session."
-                : "Paste your Ed API token here.",
+              edTokenHint: "",
               showEdToken: !canReuseSession
             }
           )
@@ -146,7 +151,7 @@ export class EdstemOAuthProvider {
           csrf.token,
           session,
           {
-            edTokenHint: "Refresh the page and try again.",
+            edTokenHint: "",
             errorMessage: "Your session expired. Reload the page and try again.",
             showEdToken: !canReuseSession
           }
@@ -421,6 +426,10 @@ export class EdstemOAuthProvider {
     grantedScopes: string[];
     user: { displayName: string; email: string; expiresAt: number; userId: number };
   }> {
+    if (getFormField(body?.accept_toc) !== "1") {
+      throw new TocConsentRequiredError();
+    }
+
     const edToken = getFormField(body?.ed_token);
     if (!edToken) {
       if (!existingSession || !canContinueWithSession(this.credentials, existingSession.userId)) {
@@ -548,6 +557,7 @@ function buildAuthorizeRedirectUrl(
 
 function mapAuthorizeErrorMessage(error: unknown): string {
   if (
+    error instanceof TocConsentRequiredError ||
     error instanceof EdTokenInvalidError ||
     error instanceof EdApiBaseUrlError ||
     error instanceof EdNotConnectedError ||
@@ -563,6 +573,7 @@ function mapAuthorizeErrorMessage(error: unknown): string {
 
 function mapAuthorizeStatusCode(error: unknown): number {
   if (
+    error instanceof TocConsentRequiredError ||
     error instanceof EdTokenInvalidError ||
     error instanceof EdApiBaseUrlError ||
     error instanceof EdNotConnectedError ||
@@ -577,16 +588,7 @@ function mapAuthorizeStatusCode(error: unknown): number {
 }
 
 function mapEdTokenHint(error: unknown, session: { email: string } | null): string {
-  if (error instanceof EdTokenInvalidError) {
-    return error.message;
-  }
-  if (error instanceof EdApiBaseUrlError) {
-    return error.message;
-  }
-  if (session) {
-    return "Leave this blank to reuse your current browser session.";
-  }
-  return "Paste your Ed API token here.";
+  return "";
 }
 
 function shouldShowEdToken(
@@ -601,6 +603,9 @@ function shouldShowEdToken(
 }
 
 function mapAuthorizeAuditReason(error: unknown): string {
+  if (error instanceof TocConsentRequiredError) {
+    return "toc_not_accepted";
+  }
   if (error instanceof EdTokenInvalidError) {
     return "invalid_ed_token";
   }

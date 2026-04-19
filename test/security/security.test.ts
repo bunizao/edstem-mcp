@@ -315,6 +315,7 @@ async function submitAuthorize(
       redirect_uri: TEST_CLIENT.redirect_uris[0]!,
       response_type: "code",
       scope: "mcp:tools.read",
+      accept_toc: "1",
       scope_read: "1"
     }),
     headers: {
