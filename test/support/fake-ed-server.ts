@@ -110,6 +110,9 @@ export async function startFakeEdServer(users: FakeEdUser[]) {
     close: async () => {
       server.stop(true);
     },
+    revokeToken(token: string) {
+      byToken.delete(token);
+    },
     submissions
   };
 }
