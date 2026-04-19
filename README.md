@@ -60,8 +60,26 @@ Health endpoints:
 ## Docker
 
 ```bash
-MASTER_KEY="$(openssl rand -base64 32)" DOMAIN=your.host docker compose up -d --build
+MASTER_KEY="$(openssl rand -base64 32)" docker compose up -d --build
 ```
+
+The compose file publishes the app directly on `8787` by default.
+
+Useful overrides:
+
+- `APP_PORT=9000` to bind another host port
+- `PUBLIC_BASE_URL=http://your-host:9000` to make OAuth metadata point at the real public URL
+
+Example:
+
+```bash
+MASTER_KEY="$(openssl rand -base64 32)" \
+APP_PORT=9000 \
+PUBLIC_BASE_URL=http://your-host:9000 \
+docker compose up -d --build
+```
+
+No reverse proxy is included. If you want TLS later, put one in front yourself.
 
 ## Backup
 

@@ -1,29 +1,17 @@
 services:
   app:
     build: .
+    restart: unless-stopped
     environment:
       DATABASE_PATH: /data/edstem-mcp.db
       ED_API_BASE_URL: https://edstem.org/api/
       MASTER_KEY: ${MASTER_KEY}
-      PUBLIC_BASE_URL: https://${DOMAIN}
+      PORT: 8787
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:${APP_PORT:-8787}}
+    ports:
+      - "${APP_PORT:-8787}:8787"
     volumes:
       - app_data:/data
 
-  caddy:
-    image: caddy:2.8
-    depends_on:
-      - app
-    environment:
-      DOMAIN: ${DOMAIN}
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-
 volumes:
   app_data:
-  caddy_data:
-  caddy_config:
