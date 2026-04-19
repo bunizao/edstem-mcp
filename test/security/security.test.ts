@@ -156,6 +156,56 @@ describe("security hardening", () => {
     expect(await blocked.text()).toContain("Too many Ed token attempts");
   });
 
+  it("rejects reconnecting with a token from a different Ed account", async () => {
+    const fakeEd = await startFakeEdServer([
+      {
+        courses: [],
+        token: "ed-token-b",
+        user: {
+          avatar: "",
+          course_role: "student",
+          email: "grace@example.com",
+          id: 202,
+          name: "Grace",
+          role: "student"
+        }
+      }
+    ]);
+    cleanups.push(fakeEd.close);
+
+    const { runtime, cleanup } = await createTestRuntime({
+      apiBaseUrl: fakeEd.baseUrl
+    });
+    cleanups.push(cleanup);
+
+    const user = upsertTestUser(runtime, {
+      email: "ada@example.com",
+      id: 101,
+      name: "Ada"
+    });
+    const sessionCookie = buildSessionCookie(
+      {
+        displayName: "Ada",
+        email: user.email,
+        expiresAt: Date.now() + runtime.config.oauth.sessionTtlSeconds * 1000,
+        userId: user.id
+      },
+      runtime.config.oauth
+    );
+    const csrfCookie = buildCsrfCookie(runtime.config.oauth, "csrf-token");
+
+    const app = await startAppServer(runtime);
+    cleanups.push(async () => app.close());
+
+    const response = await submitReconnect(
+      app.baseUrl,
+      cookieHeader(sessionCookie, csrfCookie),
+      "ed-token-b"
+    );
+    expect(response.status).toBe(422);
+    expect(await response.text()).toContain("different Ed account");
+  });
+
   it("throttles repeated authorize attempts from the same identity", async () => {
     const fakeEd = await startFakeEdServer([]);
     cleanups.push(fakeEd.close);

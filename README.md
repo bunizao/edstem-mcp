@@ -2,15 +2,17 @@
 
 Use Ed Discussion from any MCP client.
 
+Public service URL: [https://edstem.tuuhub.com/mcp](https://edstem.tuuhub.com/mcp)
+
 ## Quick Start
 
 1. Add the service URL to your MCP client.
-2. Sign in with your Ed API token.
+2. When the browser opens, paste your Ed API token.
 3. Grant `mcp:tools.read`, and `mcp:tools.write` only if you want write tools.
 
 Get your token here: [https://edstem.org/settings/api-tokens](https://edstem.org/settings/api-tokens)
 
-No country code is needed. This uses the same Ed API token flow as [edstem-cli](https://github.com/bunizao/edstem-cli): the token is verified with `GET /api/user`.
+No email, password, or country code is needed. This uses the same Ed API token flow as [edstem-cli](https://github.com/bunizao/edstem-cli): the token is verified with `GET /api/user`.
 
 ## What It Can Do
 

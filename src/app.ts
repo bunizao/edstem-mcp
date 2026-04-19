@@ -1494,25 +1494,30 @@ function renderSessionRequiredPage(
       : reason === "invalid"
         ? "Your browser session is no longer valid. Start a fresh OAuth sign-in, then come back."
         : "Open this page from a browser session that already authorized EdStem MCP.";
-  return `<!doctype html>
-<html lang="en">
-  <head><meta charset="utf-8"><title>EdStem MCP</title></head>
-  <body>
-    <main>
-      <h1>Sign in first</h1>
-      <p>${escapeHtml(detail)}</p>
-      <p>Then return to <code>${escapeHtml(kind)}</code>.</p>
-    </main>
-  </body>
-</html>`;
+  return renderStandalonePage({
+    body: `
+      <section class="card">
+        <div class="badge">Session required</div>
+        <h1>Sign in again</h1>
+        <p class="lead">${escapeHtml(detail)}</p>
+        <p class="muted">Then return to <code>${escapeHtml(kind)}</code>.</p>
+      </section>
+    `,
+    title: "Sign in first"
+  });
 }
 
 function renderDeletedPage(): string {
-  return `<!doctype html>
-<html lang="en">
-  <head><meta charset="utf-8"><title>Account deleted</title></head>
-  <body><main><h1>Account deleted</h1></main></body>
-</html>`;
+  return renderStandalonePage({
+    body: `
+      <section class="card">
+        <div class="badge">Connection removed</div>
+        <h1>Account deleted</h1>
+        <p class="lead">Your encrypted Ed token and local session were removed from this service.</p>
+      </section>
+    `,
+    title: "Account deleted"
+  });
 }
 
 function renderSettingsPage(options: {
@@ -1521,25 +1526,45 @@ function renderSettingsPage(options: {
   session: { displayName: string; email: string; userId: number };
   status: { connected: boolean; edUserName?: string; isInvalid: boolean; lastVerifiedAt?: number };
 }): string {
-  return simplePage(
-    "Settings",
-    `
-      <h1>Connection</h1>
-      <p>Signed in as <strong>${escapeHtml(options.session.displayName)}</strong> (${escapeHtml(options.session.email)})</p>
-      <p>Status: ${options.status.connected ? (options.status.isInvalid ? "needs reconnect" : `connected as ${escapeHtml(options.status.edUserName ?? "")}`) : "not connected"}</p>
-      ${options.errorMessage ? `<p class="error">${escapeHtml(options.errorMessage)}</p>` : ""}
-      <form method="post" action="/settings/rotate">
-        <input type="hidden" name="csrf_token" value="${escapeHtml(options.csrfToken)}">
-        <label>Rotate Ed token</label>
-        <input type="password" name="ed_token" autocomplete="off">
-        <button type="submit">Update</button>
-      </form>
-      <form method="post" action="/settings/delete" onsubmit="return confirm('Delete this account?');">
-        <input type="hidden" name="csrf_token" value="${escapeHtml(options.csrfToken)}">
-        <button type="submit">Delete account</button>
-      </form>
-    `
-  );
+  return renderStandalonePage({
+    body: `
+      <section class="card">
+        <div class="badge">Connection settings</div>
+        <h1>${escapeHtml(options.session.displayName)}</h1>
+        <p class="lead">${escapeHtml(options.session.email)}</p>
+        <div class="summary-grid">
+          <div class="summary-item">
+            <span class="summary-label">Ed status</span>
+            <strong>${escapeHtml(formatConnectionStatus(options.status))}</strong>
+          </div>
+          <div class="summary-item">
+            <span class="summary-label">Last verified</span>
+            <strong>${escapeHtml(formatVerifiedAt(options.status.lastVerifiedAt))}</strong>
+          </div>
+        </div>
+      </section>
+      ${options.errorMessage ? `<section class="card error-card">${escapeHtml(options.errorMessage)}</section>` : ""}
+      <section class="card">
+        <h2>Rotate Ed token</h2>
+        <p class="muted">Paste a fresh token for the same Ed account. If you want to switch accounts, start a new OAuth sign-in instead.</p>
+        <form method="post" action="/settings/rotate" class="form-stack">
+          <input type="hidden" name="csrf_token" value="${escapeHtml(options.csrfToken)}">
+          <label for="settings-ed-token">Ed API token</label>
+          <input id="settings-ed-token" type="password" name="ed_token" autocomplete="off" placeholder="Paste your new Ed API token">
+          <button type="submit">Update token</button>
+        </form>
+      </section>
+      <section class="card danger-card">
+        <h2>Danger zone</h2>
+        <p class="muted">Delete the local account record and encrypted token for this browser session.</p>
+        <form method="post" action="/settings/delete" onsubmit="return confirm('Delete this account?');" class="form-stack">
+          <input type="hidden" name="csrf_token" value="${escapeHtml(options.csrfToken)}">
+          <button type="submit" class="button-danger">Delete account</button>
+        </form>
+      </section>
+    `,
+    title: "Settings"
+  });
 }
 
 function renderReconnectPage(options: {
@@ -1548,39 +1573,237 @@ function renderReconnectPage(options: {
   session: { displayName: string; email: string; userId: number };
   status: { connected: boolean; edUserName?: string; isInvalid: boolean; lastVerifiedAt?: number };
 }): string {
-  return simplePage(
-    "Reconnect",
-    `
-      <h1>Reconnect Ed</h1>
-      <p>${escapeHtml(options.session.displayName)} (${escapeHtml(options.session.email)})</p>
-      <p>Status: ${options.status.connected && !options.status.isInvalid ? `connected as ${escapeHtml(options.status.edUserName ?? "")}` : "needs Ed token"}</p>
-      ${options.errorMessage ? `<p class="error">${escapeHtml(options.errorMessage)}</p>` : ""}
-      <form method="post" action="/reconnect">
-        <input type="hidden" name="csrf_token" value="${escapeHtml(options.csrfToken)}">
-        <label>Ed API token</label>
-        <input type="password" name="ed_token" autocomplete="off">
-        <button type="submit">Reconnect</button>
-      </form>
-    `
-  );
+  return renderStandalonePage({
+    body: `
+      <section class="card">
+        <div class="badge">Reconnect Ed</div>
+        <h1>${escapeHtml(options.session.displayName)}</h1>
+        <p class="lead">${escapeHtml(options.session.email)}</p>
+        <p class="muted">${escapeHtml(formatConnectionStatus(options.status))}</p>
+      </section>
+      ${options.errorMessage ? `<section class="card error-card">${escapeHtml(options.errorMessage)}</section>` : ""}
+      <section class="card">
+        <h2>Paste a fresh Ed token</h2>
+        <p class="muted">This updates the token for the same Ed account and restores MCP access.</p>
+        <form method="post" action="/reconnect" class="form-stack">
+          <input type="hidden" name="csrf_token" value="${escapeHtml(options.csrfToken)}">
+          <label for="reconnect-ed-token">Ed API token</label>
+          <input id="reconnect-ed-token" type="password" name="ed_token" autocomplete="off" placeholder="Paste your Ed API token">
+          <button type="submit">Reconnect</button>
+        </form>
+      </section>
+    `,
+    title: "Reconnect"
+  });
 }
 
-function simplePage(title: string, body: string): string {
+function renderStandalonePage(options: { body: string; title: string }): string {
   return `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>${escapeHtml(title)}</title>
+    <title>${escapeHtml(options.title)}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
     <style>
-      body { font-family: system-ui, sans-serif; background: #f4efe5; color: #1e1b16; margin: 0; }
-      main { max-width: 40rem; margin: 3rem auto; padding: 2rem; background: white; border-radius: 1rem; }
-      input, button { display: block; width: 100%; margin: 0.5rem 0 1rem; padding: 0.75rem; }
-      .error { color: #a53d2b; }
+      :root {
+        color-scheme: light;
+        --background: #f6f3ee;
+        --surface: rgba(255, 255, 255, 0.84);
+        --text: #171717;
+        --muted: #66615a;
+        --border: rgba(23, 23, 23, 0.1);
+        --accent: #1f6b57;
+        --accent-hover: #184f42;
+        --danger: #a13f35;
+        --radius-xl: 28px;
+        --radius-lg: 18px;
+        --radius-md: 14px;
+        --shadow: 0 30px 80px rgba(17, 17, 17, 0.12);
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          radial-gradient(circle at top left, rgba(31, 107, 87, 0.14), transparent 30%),
+          radial-gradient(circle at bottom right, rgba(23, 23, 23, 0.08), transparent 34%),
+          linear-gradient(180deg, #fbf9f5 0%, var(--background) 100%);
+        color: var(--text);
+        font-family: "IBM Plex Sans", sans-serif;
+      }
+      main {
+        width: min(100%, 44rem);
+        margin: 0 auto;
+        padding: 2rem 1rem;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+      }
+      .stack {
+        width: 100%;
+        display: grid;
+        gap: 1rem;
+      }
+      .card {
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        background: color-mix(in srgb, var(--surface) 92%, white);
+        padding: 1.5rem;
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(20px);
+      }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        min-height: 2rem;
+        padding: 0.3rem 0.75rem;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: rgba(17, 17, 17, 0.03);
+        font-size: 0.82rem;
+        font-weight: 600;
+      }
+      h1, h2 {
+        margin: 0;
+        font-family: "Instrument Serif", serif;
+        font-weight: 400;
+        letter-spacing: -0.03em;
+      }
+      h1 {
+        margin-top: 0.9rem;
+        font-size: clamp(2.3rem, 6vw, 3.4rem);
+        line-height: 0.95;
+      }
+      h2 {
+        font-size: 1.7rem;
+        line-height: 1;
+      }
+      .lead {
+        margin: 0.7rem 0 0;
+        color: var(--text);
+        font-size: 1rem;
+        line-height: 1.65;
+      }
+      .muted {
+        margin: 0.7rem 0 0;
+        color: var(--muted);
+        line-height: 1.6;
+      }
+      .summary-grid {
+        margin-top: 1.25rem;
+        display: grid;
+        gap: 0.85rem;
+        grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+      }
+      .summary-item {
+        padding: 1rem;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: rgba(17, 17, 17, 0.025);
+      }
+      .summary-label {
+        display: block;
+        color: var(--muted);
+        font-size: 0.82rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+      .summary-item strong {
+        display: block;
+        margin-top: 0.35rem;
+        font-size: 0.98rem;
+      }
+      .form-stack {
+        margin-top: 1rem;
+        display: grid;
+        gap: 0.85rem;
+      }
+      label {
+        font-size: 0.92rem;
+        font-weight: 600;
+      }
+      input, button {
+        width: 100%;
+        min-height: 3rem;
+        border-radius: var(--radius-md);
+        font: inherit;
+      }
+      input {
+        border: 1px solid var(--border);
+        padding: 0.85rem 1rem;
+        background: white;
+      }
+      input:focus {
+        outline: none;
+        border-color: color-mix(in srgb, var(--accent) 60%, white);
+        box-shadow: 0 0 0 4px rgba(31, 107, 87, 0.12);
+      }
+      button {
+        border: 0;
+        background: var(--accent);
+        color: white;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button:hover {
+        background: var(--accent-hover);
+      }
+      .danger-card {
+        border-color: color-mix(in srgb, var(--danger) 18%, white);
+      }
+      .error-card {
+        color: var(--danger);
+        border-color: color-mix(in srgb, var(--danger) 18%, white);
+        background: color-mix(in srgb, var(--danger) 8%, white);
+      }
+      .button-danger {
+        background: var(--danger);
+      }
+      .button-danger:hover {
+        background: #8d352c;
+      }
+      code {
+        font-size: 0.9em;
+      }
+      @media (max-width: 640px) {
+        main {
+          padding: 1rem;
+        }
+        .card {
+          padding: 1.25rem;
+        }
+      }
     </style>
   </head>
-  <body><main>${body}</main></body>
+  <body><main><div class="stack">${options.body}</div></main></body>
 </html>`;
+}
+
+function formatConnectionStatus(status: {
+  connected: boolean;
+  edUserName?: string;
+  isInvalid: boolean;
+}): string {
+  if (!status.connected) {
+    return "Not connected";
+  }
+  if (status.isInvalid) {
+    return "Needs reconnect";
+  }
+  return status.edUserName ? `Connected as ${status.edUserName}` : "Connected";
+}
+
+function formatVerifiedAt(timestamp: number | undefined): string {
+  if (!timestamp) {
+    return "Not verified yet";
+  }
+  return new Date(timestamp).toLocaleString("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short"
+  });
 }
 
 function escapeHtml(value: string): string {
