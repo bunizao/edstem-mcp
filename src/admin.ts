@@ -5,14 +5,27 @@ import { createRuntime } from "./runtime.js";
 
 async function main(): Promise<void> {
   const [command, email, passwordArg] = process.argv.slice(2);
-  if (command !== "reset-password" || !email) {
-    throw new Error("Usage: npm run admin -- reset-password <email> [new-password]");
+  if (!command) {
+    throw new Error(
+      "Usage: bun run admin -- reset-password <email> [new-password] | prune-expired"
+    );
   }
 
   const config = loadConfig();
   const runtime = createRuntime(config);
 
   try {
+    if (command === "prune-expired") {
+      console.log(JSON.stringify(runtime.store.pruneExpired()));
+      return;
+    }
+
+    if (command !== "reset-password" || !email) {
+      throw new Error(
+        "Usage: bun run admin -- reset-password <email> [new-password] | prune-expired"
+      );
+    }
+
     const user = runtime.users.findByEmail(email);
     if (!user) {
       throw new Error(`User not found: ${email}`);

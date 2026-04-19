@@ -89,6 +89,7 @@ export interface OAuthConfig {
 
 export interface AppConfig {
   apiBaseUrl: string;
+  dbCleanupIntervalSeconds: number;
   databasePath: string;
   devEdApiToken?: string;
   logLevel: "debug" | "info" | "warn" | "error";
@@ -117,6 +118,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 
   return {
     apiBaseUrl: normalizeApiBaseUrl(env.ED_API_BASE_URL),
+    dbCleanupIntervalSeconds: parsePositiveInt(env.DB_CLEANUP_INTERVAL_SECONDS, 900),
     databasePath: env.DATABASE_PATH?.trim() || DEFAULT_DATABASE_PATH,
     devEdApiToken: env.ED_API_TOKEN?.trim() || undefined,
     logLevel:

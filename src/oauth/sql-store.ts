@@ -154,10 +154,29 @@ export class SqlOAuthStore {
     return row ? mapRefreshToken(row) : undefined;
   }
 
-  pruneExpired(now: number = Date.now()): void {
-    this.db.query("DELETE FROM oauth_access_tokens WHERE expires_at <= ?").run(now);
-    this.db.query("DELETE FROM oauth_refresh_tokens WHERE expires_at <= ?").run(now);
-    this.db.query("DELETE FROM oauth_authorization_codes WHERE expires_at <= ?").run(now);
+  pruneExpired(now: number = Date.now()): {
+    accessTokensDeleted: number;
+    authorizationCodesDeleted: number;
+    refreshTokensDeleted: number;
+    totalDeleted: number;
+  } {
+    const accessTokensDeleted = runDelete(
+      this.db.query("DELETE FROM oauth_access_tokens WHERE expires_at <= ?").run(now)
+    );
+    const refreshTokensDeleted = runDelete(
+      this.db.query("DELETE FROM oauth_refresh_tokens WHERE expires_at <= ?").run(now)
+    );
+    const authorizationCodesDeleted = runDelete(
+      this.db.query("DELETE FROM oauth_authorization_codes WHERE expires_at <= ?").run(now)
+    );
+
+    return {
+      accessTokensDeleted,
+      authorizationCodesDeleted,
+      refreshTokensDeleted,
+      totalDeleted:
+        accessTokensDeleted + refreshTokensDeleted + authorizationCodesDeleted
+    };
   }
 
   saveAccessToken(token: string, record: AccessTokenRecord): void {
@@ -310,4 +329,13 @@ function mapRefreshToken(row: RefreshTokenRow): RefreshTokenRecord {
     userId: row.user_id,
     username: row.username
   };
+}
+
+function runDelete(result: unknown): number {
+  return typeof result === "object" &&
+    result !== null &&
+    "changes" in result &&
+    typeof result.changes === "number"
+    ? result.changes
+    : 0;
 }

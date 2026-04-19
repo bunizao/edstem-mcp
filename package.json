@@ -9,6 +9,7 @@
     "admin": "bun src/admin.ts",
     "build": "bun build src/index.ts src/admin.ts --outdir dist --target bun",
     "check": "bunx tsc --noEmit -p tsconfig.json",
+    "db:prune": "bun src/admin.ts prune-expired",
     "dev": "bun --watch src/index.ts",
     "start": "bun src/index.ts",
     "test": "bun test"

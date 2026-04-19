@@ -1,9 +1,23 @@
 services:
   app:
     build: .
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "bun",
+          "-e",
+          "fetch('http://127.0.0.1:8787/readyz').then((response) => { if (!response.ok) throw new Error(String(response.status)); })"
+        ]
+      interval: 30s
+      retries: 5
+      start_period: 10s
+      timeout: 5s
+    init: true
     restart: unless-stopped
     environment:
       DATABASE_PATH: /data/edstem-mcp.db
+      DB_CLEANUP_INTERVAL_SECONDS: ${DB_CLEANUP_INTERVAL_SECONDS:-900}
       ED_API_BASE_URL: https://edstem.org/api/
       MASTER_KEY: ${MASTER_KEY}
       PORT: 8787

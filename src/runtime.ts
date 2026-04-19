@@ -37,9 +37,13 @@ export function createRuntime(config: AppConfig, logger?: Logger): Runtime {
     store,
     users
   });
+  const cleanupTimer = startCleanupTimer(store, resolvedLogger, config.dbCleanupIntervalSeconds);
 
   return {
     close() {
+      if (cleanupTimer) {
+        clearInterval(cleanupTimer);
+      }
       db.close();
     },
     config,
@@ -50,4 +54,32 @@ export function createRuntime(config: AppConfig, logger?: Logger): Runtime {
     store,
     users
   };
+}
+
+function startCleanupTimer(
+  store: SqlOAuthStore,
+  logger: Logger,
+  intervalSeconds: number
+): ReturnType<typeof setInterval> | undefined {
+  if (intervalSeconds <= 0) {
+    return undefined;
+  }
+
+  const runCleanup = () => {
+    const summary = store.pruneExpired();
+    if (summary.totalDeleted > 0) {
+      logger.info(
+        {
+          event: "db.cleanup.completed",
+          ...summary
+        },
+        "database cleanup completed"
+      );
+    }
+  };
+
+  runCleanup();
+  const timer = setInterval(runCleanup, intervalSeconds * 1000);
+  timer.unref?.();
+  return timer;
 }
