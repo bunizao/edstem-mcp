@@ -12,7 +12,7 @@ Public service URL: [https://edstem.tuuhub.com/mcp](https://edstem.tuuhub.com/mc
 
 Get your token here: [https://edstem.org/settings/api-tokens](https://edstem.org/settings/api-tokens)
 
-No email, password, or country code is needed. This uses the same Ed API token flow as [edstem-cli](https://github.com/bunizao/edstem-cli): the token is verified with `GET /api/user`.
+Only an Ed API token is needed. One token is treated as one user and verified with `GET /api/user`.
 
 ## What It Can Do
 
@@ -48,7 +48,7 @@ bun run start
 Docker image: [ghcr.io/bunizao/edstem-mcp](https://ghcr.io/bunizao/edstem-mcp)
 
 ```bash
-docker run -d --name edstem-mcp --restart unless-stopped -p 8787:8787 -e MASTER_KEY=YOUR_BASE64_32_BYTE_KEY -e PUBLIC_BASE_URL=https://your-host.example -e DATABASE_PATH=/data/edstem-mcp.db -v edstem-mcp-data:/data ghcr.io/bunizao/edstem-mcp:latest
+docker run -d --restart unless-stopped --env-file .env -p 8787:8787 -v edstem-mcp-data:/data ghcr.io/bunizao/edstem-mcp:latest
 ```
 
 ### Notes
