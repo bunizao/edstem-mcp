@@ -15,8 +15,8 @@ ENV NODE_ENV=production
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile --production
 
-COPY src ./src
 COPY dist ./dist
+COPY src/db/migrations ./src/db/migrations
 
 EXPOSE 8787
-CMD ["bun", "src/index.ts"]
+CMD ["bun", "dist/index.js"]
