@@ -1,4 +1,4 @@
-# Terms of Connection and Token Handling
+# Terms of Service
 
 > Draft only. Replace every bracketed placeholder before publishing. This document is a practical service draft, not legal advice.
 
