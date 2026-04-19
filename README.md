@@ -34,6 +34,51 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
+### Docker Registry
+
+The GitHub Actions workflow publishes multi-arch images to:
+
+```text
+ghcr.io/bunizao/edstem-mcp
+```
+
+- Push to `master` updates `:latest`
+- Tagging `v0.1.0` publishes `:v0.1.0` and `:0.1.0`
+
+On a server, use the published image instead of rebuilding:
+
+```yaml
+services:
+  app:
+    image: ghcr.io/bunizao/edstem-mcp:latest
+    restart: unless-stopped
+    init: true
+    environment:
+      DATABASE_PATH: /data/edstem-mcp.db
+      DB_CLEANUP_INTERVAL_SECONDS: ${DB_CLEANUP_INTERVAL_SECONDS:-900}
+      ED_API_BASE_URL: https://edstem.org/api/
+      MASTER_KEY: ${MASTER_KEY}
+      PORT: 8787
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL}
+    ports:
+      - "8787:8787"
+    volumes:
+      - app_data:/data
+
+volumes:
+  app_data:
+```
+
+Update flow:
+
+```bash
+docker login ghcr.io
+docker compose pull
+docker compose up -d
+```
+
+If the package stays private, the deploy machine needs a token with `read:packages`.
+
 ### Local Run
 
 ```bash
