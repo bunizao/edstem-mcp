@@ -1,5 +1,11 @@
 # edstem-mcp
 
+![MCP Server](https://img.shields.io/badge/MCP-remote%20server-6f42c1)
+[![Bun](https://img.shields.io/badge/runtime-Bun%201.3%2B-f9f1e1?logo=bun&logoColor=000000)](https://bun.sh/)
+[![Docker Publish](https://img.shields.io/github/actions/workflow/status/bunizao/edstem-mcp/docker-publish.yml?branch=master&label=docker%20publish)](https://github.com/bunizao/edstem-mcp/actions/workflows/docker-publish.yml)
+[![GHCR](https://img.shields.io/badge/GHCR-ghcr.io%2Fbunizao%2Fedstem--mcp-2496ED?logo=docker&logoColor=white)](https://ghcr.io/bunizao/edstem-mcp)
+[![License](https://img.shields.io/github/license/bunizao/edstem-mcp)](./LICENSE)
+
 Use Ed Discussion from any MCP client.
 
 Public service URL: [https://edstem.tuuhub.com/mcp](https://edstem.tuuhub.com/mcp)
