@@ -33,7 +33,6 @@ Ignore this if you are just using the public service.
 ```bash
 cp .env.example .env
 # Fill in MASTER_KEY and PUBLIC_BASE_URL first.
-docker compose pull
 docker compose up -d
 ```
 
