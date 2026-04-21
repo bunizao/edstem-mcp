@@ -48,8 +48,6 @@ bun run start
 
 Docker image: [ghcr.io/bunizao/edstem-mcp](https://ghcr.io/bunizao/edstem-mcp)
 
-Set `APP_IMAGE` in `.env` if you want to pin a specific tag instead of `latest`.
-
 ```bash
 docker run -d --restart unless-stopped --env-file .env -p 8787:8787 -v edstem-mcp-data:/data ghcr.io/bunizao/edstem-mcp:latest
 ```

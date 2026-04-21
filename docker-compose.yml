@@ -1,6 +1,6 @@
 services:
   app:
-    image: ${APP_IMAGE:-ghcr.io/bunizao/edstem-mcp:latest}
+    image: ghcr.io/bunizao/edstem-mcp:latest
     init: true
     pull_policy: always
     restart: unless-stopped
