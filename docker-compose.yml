@@ -1,7 +1,8 @@
 services:
   app:
-    build: .
+    image: ${APP_IMAGE:-ghcr.io/bunizao/edstem-mcp:latest}
     init: true
+    pull_policy: always
     restart: unless-stopped
     environment:
       DATABASE_PATH: /data/edstem-mcp.db

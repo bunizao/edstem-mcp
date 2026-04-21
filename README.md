@@ -33,7 +33,8 @@ Ignore this if you are just using the public service.
 ```bash
 cp .env.example .env
 # Fill in MASTER_KEY and PUBLIC_BASE_URL first.
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 ```
 
 ### Local Run
@@ -46,6 +47,8 @@ bun run start
 ```
 
 Docker image: [ghcr.io/bunizao/edstem-mcp](https://ghcr.io/bunizao/edstem-mcp)
+
+Set `APP_IMAGE` in `.env` if you want to pin a specific tag instead of `latest`.
 
 ```bash
 docker run -d --restart unless-stopped --env-file .env -p 8787:8787 -v edstem-mcp-data:/data ghcr.io/bunizao/edstem-mcp:latest
