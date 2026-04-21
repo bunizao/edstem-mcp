@@ -61,6 +61,34 @@ describe("security hardening", () => {
     expect(response.headers.get("X-Frame-Options")).toBe("DENY");
   });
 
+  it("serves protected resource metadata from both root and MCP-specific paths", async () => {
+    const fakeEd = await startFakeEdServer([]);
+    cleanups.push(fakeEd.close);
+
+    const { runtime, cleanup } = await createTestRuntime({
+      apiBaseUrl: fakeEd.baseUrl
+    });
+    cleanups.push(cleanup);
+
+    const app = await startAppServer(runtime);
+    cleanups.push(async () => app.close());
+
+    const rootResponse = await fetch(`${app.baseUrl}/.well-known/oauth-protected-resource`);
+    const mcpResponse = await fetch(`${app.baseUrl}/.well-known/oauth-protected-resource/mcp`);
+
+    expect(rootResponse.status).toBe(200);
+    expect(mcpResponse.status).toBe(200);
+
+    const rootMetadata = await rootResponse.json();
+    const mcpMetadata = await mcpResponse.json();
+
+    expect(rootMetadata).toEqual(mcpMetadata);
+    expect(rootMetadata).toMatchObject({
+      authorization_servers: [runtime.config.oauth.issuerUrl.href],
+      resource: runtime.config.oauth.mcpServerUrl.href
+    });
+  });
+
   it("clears expired session cookies on protected pages", async () => {
     const fakeEd = await startFakeEdServer([]);
     cleanups.push(fakeEd.close);

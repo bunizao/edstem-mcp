@@ -47,6 +47,7 @@ const AUTH_RATE_LIMIT = {
   limit: 20,
   windowMs: 15 * 60 * 1000
 } as const;
+const ROOT_PROTECTED_RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource";
 
 const CLIENT_REGISTRATION_RATE_LIMIT = {
   limit: 20,
@@ -189,7 +190,11 @@ async function routeRequest(
       return createJsonResponse(oauthMetadata, 200, corsHeaders());
     }
 
-    if (pathname === protectedResourceMetadataPath && request.method === "GET") {
+    if (
+      (pathname === protectedResourceMetadataPath ||
+        pathname === ROOT_PROTECTED_RESOURCE_METADATA_PATH) &&
+      request.method === "GET"
+    ) {
       return createJsonResponse(
         {
           authorization_servers: [runtime.config.oauth.issuerUrl.href],
@@ -1346,6 +1351,7 @@ function isCorsPath(pathname: string, runtime: Runtime): boolean {
     pathname === "/token" ||
     pathname === "/revoke" ||
     pathname === "/.well-known/oauth-authorization-server" ||
+    pathname === ROOT_PROTECTED_RESOURCE_METADATA_PATH ||
     pathname ===
       new URL(getOAuthProtectedResourceMetadataUrl(runtime.config.oauth.mcpServerUrl)).pathname
   );
