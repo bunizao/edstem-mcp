@@ -98,4 +98,37 @@ describe("sqlite runtime", () => {
       )
     ).toThrow();
   });
+
+  it("seeds a fixed OAuth client when configured", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "edstem-mcp-fixed-client-"));
+    cleanups.push(async () => {
+      await rm(directory, { force: true, recursive: true });
+    });
+
+    const runtime = createRuntime(
+      loadConfig({
+        DATABASE_PATH: path.join(directory, "fixed-client.db"),
+        ED_API_BASE_URL: "http://127.0.0.1:1/api/",
+        MASTER_KEY: TEST_MASTER_KEY,
+        OAUTH_FIXED_CLIENT_ID: "claude-fixed-client",
+        OAUTH_FIXED_CLIENT_NAME: "Claude Fixed Client",
+        OAUTH_FIXED_CLIENT_REDIRECT_URIS:
+          "https://claude.ai/api/mcp/auth_callback,https://claude.ai/api/mcp/auth_callback_alt",
+        OAUTH_FIXED_CLIENT_SECRET: "super-secret",
+        PUBLIC_BASE_URL: "http://127.0.0.1:9999"
+      })
+    );
+    cleanups.push(async () => runtime.close());
+
+    expect(runtime.store.getClient("claude-fixed-client")).toMatchObject({
+      client_id: "claude-fixed-client",
+      client_name: "Claude Fixed Client",
+      client_secret: "super-secret",
+      redirect_uris: [
+        "https://claude.ai/api/mcp/auth_callback",
+        "https://claude.ai/api/mcp/auth_callback_alt"
+      ],
+      token_endpoint_auth_method: "client_secret_post"
+    });
+  });
 });

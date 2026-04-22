@@ -60,6 +60,7 @@ docker run -d --restart unless-stopped --env-file .env -p 8787:8787 -v edstem-mc
 ### Notes
 
 - `PUBLIC_BASE_URL` must match the real external URL clients use.
+- Optional: set `OAUTH_FIXED_CLIENT_ID`, `OAUTH_FIXED_CLIENT_SECRET`, and `OAUTH_FIXED_CLIENT_REDIRECT_URIS` to pre-seed a confidential OAuth client for Claude's Advanced settings flow.
 - Health endpoints: `/healthz` and `/readyz`
 - The image ships with a `readyz` health check.
 - Backups: `./scripts/backup-db.sh .data/edstem-mcp.db`

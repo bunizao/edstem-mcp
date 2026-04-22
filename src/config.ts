@@ -1,5 +1,7 @@
 const DEFAULT_API_BASE_URL = "https://edstem.org/api/";
 const DEFAULT_DATABASE_PATH = ".data/edstem-mcp.db";
+const DEFAULT_FIXED_CLIENT_NAME = "Claude Remote Connector";
+const DEFAULT_FIXED_CLIENT_REDIRECT_URI = "https://claude.ai/api/mcp/auth_callback";
 const DEFAULT_READ_SCOPE = "mcp:tools.read";
 const DEFAULT_WRITE_SCOPE = "mcp:tools.write";
 
@@ -53,6 +55,26 @@ function parseUrl(value: string | undefined, fallback: string): URL {
   return new URL(value?.trim() || fallback);
 }
 
+function parseUrlList(
+  name: string,
+  value: string | undefined,
+  fallback: string[]
+): string[] {
+  const rawValues = value
+    ?.split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  const entries = rawValues && rawValues.length > 0 ? rawValues : fallback;
+
+  return entries.map((entry) => {
+    try {
+      return new URL(entry).toString();
+    } catch {
+      throw new Error(`${name} must contain valid absolute URLs`);
+    }
+  });
+}
+
 function parseMasterKey(name: string, value: string | undefined): Buffer | undefined {
   const trimmed = value?.trim();
   if (!trimmed) {
@@ -76,6 +98,7 @@ function parseMasterKey(name: string, value: string | undefined): Buffer | undef
 export interface OAuthConfig {
   accessTokenTtlSeconds: number;
   enabled: boolean;
+  fixedClient?: StaticOAuthClientConfig;
   issuerUrl: URL;
   mcpServerUrl: URL;
   readScope: string;
@@ -85,6 +108,13 @@ export interface OAuthConfig {
   sessionTtlSeconds: number;
   supportedScopes: string[];
   writeScope: string;
+}
+
+export interface StaticOAuthClientConfig {
+  clientId: string;
+  clientName: string;
+  clientSecret: string;
+  redirectUris: string[];
 }
 
 export interface AppConfig {
@@ -117,6 +147,7 @@ export function loadConfig(
   const writeScope = env.OAUTH_WRITE_SCOPE?.trim() || DEFAULT_WRITE_SCOPE;
   const sessionSecret =
     env.OAUTH_SESSION_SECRET?.trim() || masterKey.toString("base64url");
+  const fixedClient = parseFixedOAuthClient(env);
 
   return {
     apiBaseUrl: normalizeApiBaseUrl(env.ED_API_BASE_URL),
@@ -135,6 +166,7 @@ export function loadConfig(
         3600
       ),
       enabled: parseBoolean(env.OAUTH_ENABLED, true),
+      fixedClient,
       issuerUrl: parseUrl(env.OAUTH_ISSUER_URL, publicBaseUrl.href),
       mcpServerUrl: new URL(mcpPath, publicBaseUrl),
       readScope,
@@ -150,5 +182,33 @@ export function loadConfig(
     },
     port,
     publicBaseUrl
+  };
+}
+
+function parseFixedOAuthClient(
+  env: Record<string, string | undefined>
+): StaticOAuthClientConfig | undefined {
+  const clientId = env.OAUTH_FIXED_CLIENT_ID?.trim();
+  const clientSecret = env.OAUTH_FIXED_CLIENT_SECRET?.trim();
+
+  if (!clientId && !clientSecret) {
+    return undefined;
+  }
+
+  if (!clientId || !clientSecret) {
+    throw new Error(
+      "OAUTH_FIXED_CLIENT_ID and OAUTH_FIXED_CLIENT_SECRET must both be set"
+    );
+  }
+
+  return {
+    clientId,
+    clientName: env.OAUTH_FIXED_CLIENT_NAME?.trim() || DEFAULT_FIXED_CLIENT_NAME,
+    clientSecret,
+    redirectUris: parseUrlList(
+      "OAUTH_FIXED_CLIENT_REDIRECT_URIS",
+      env.OAUTH_FIXED_CLIENT_REDIRECT_URIS,
+      [DEFAULT_FIXED_CLIENT_REDIRECT_URI]
+    )
   };
 }
