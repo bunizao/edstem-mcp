@@ -238,8 +238,10 @@ describe("security hardening", () => {
     const fakeEd = await startFakeEdServer([]);
     cleanups.push(fakeEd.close);
 
+    const memoryLogger = createMemoryLogger();
     const { runtime, cleanup } = await createTestRuntime({
-      apiBaseUrl: fakeEd.baseUrl
+      apiBaseUrl: fakeEd.baseUrl,
+      logger: memoryLogger.logger
     });
     cleanups.push(cleanup);
     runtime.store.saveClient(TEST_CLIENT);
@@ -257,6 +259,17 @@ describe("security hardening", () => {
     expect(blocked.status).toBe(429);
     expect(blocked.headers.get("Retry-After")).toBeTruthy();
     expect(await blocked.text()).toContain("Too many attempts");
+    expect(
+      memoryLogger.entries.some(
+        (entry) =>
+          entry.message === "oauth authorize attempt throttled" &&
+          entry.fields.event === "oauth.authorize.attempt_throttled" &&
+          typeof entry.fields.attemptKey === "string" &&
+          typeof entry.fields.resetInSec === "number" &&
+          entry.fields.hasEdToken === true &&
+          entry.fields.hasTosConsent === true
+      )
+    ).toBe(true);
   });
 
   it("writes oauth audit logs for denied and approved authorization attempts", async () => {

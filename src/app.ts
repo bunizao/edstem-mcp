@@ -306,13 +306,22 @@ async function handleAuthorize(
       response.appendHeader("Set-Cookie", buildExpiredSessionCookie(runtime.config.oauth));
     }
 
-    if (!rateLimiter.allow(requestKey(request, "authorize"), AUTH_RATE_LIMIT)) {
+    const authorizeKey = requestKey(request, "authorize");
+    if (!rateLimiter.allow(authorizeKey, AUTH_RATE_LIMIT)) {
+      const limitState = rateLimiter.inspect(authorizeKey, AUTH_RATE_LIMIT);
       runtime.logger.warn(
         {
+          attemptKey: authorizeKey,
           clientId,
           clientIp: context.clientIp,
           event: "oauth.authorize.throttled",
-          requestId: context.requestId
+          limit: limitState.limit,
+          remaining: limitState.remaining,
+          requestMethod: request.method,
+          requestId: context.requestId,
+          resetInSec: Math.ceil(limitState.resetInMs / 1000),
+          sessionReason: sessionState.reason,
+          windowMs: AUTH_RATE_LIMIT.windowMs
         },
         "oauth authorize throttled"
       );
@@ -333,19 +342,25 @@ async function handleAuthorize(
       );
     }
 
-    if (
-      request.method === "POST" &&
-      !rateLimiter.allow(
-        buildAuthorizeAttemptKey(request, sessionState.session),
-        AUTHORIZE_ATTEMPT_RATE_LIMIT
-      )
-    ) {
+    const attemptKey = buildAuthorizeAttemptKey(request, sessionState.session);
+    if (request.method === "POST" && !rateLimiter.allow(attemptKey, AUTHORIZE_ATTEMPT_RATE_LIMIT)) {
+      const limitState = rateLimiter.inspect(attemptKey, AUTHORIZE_ATTEMPT_RATE_LIMIT);
       runtime.logger.warn(
         {
           clientId,
           clientIp: context.clientIp,
+          attemptKey,
+          attemptScope: sessionState.session ? "user" : "ip",
           event: "oauth.authorize.attempt_throttled",
-          requestId: context.requestId
+          hasEdToken: Boolean(form?.ed_token?.trim()),
+          hasTosConsent: form?.accept_toc === "1",
+          limit: limitState.limit,
+          remaining: limitState.remaining,
+          requestId: context.requestId,
+          resetInSec: Math.ceil(limitState.resetInMs / 1000),
+          sessionReason: sessionState.reason,
+          sessionUserId: sessionState.session?.userId,
+          windowMs: AUTHORIZE_ATTEMPT_RATE_LIMIT.windowMs
         },
         "oauth authorize attempt throttled"
       );
@@ -1309,25 +1324,54 @@ type RateLimitConfig = {
   windowMs: number;
 };
 
+type RateLimitState = {
+  hitCount: number;
+  limit: number;
+  oldestTimestamp?: number;
+  remaining: number;
+  resetInMs: number;
+};
+
 type RateLimiter = {
   allow(key: string, config: RateLimitConfig): boolean;
+  inspect(key: string, config: RateLimitConfig): RateLimitState;
 };
 
 function createRateLimiter(): RateLimiter {
   const hits = new Map<string, number[]>();
+  const snapshot = (key: string, config: RateLimitConfig, now: number): RateLimitState => {
+    const current = hits.get(key) ?? [];
+    const active = current.filter((timestamp) => now - timestamp < config.windowMs);
+    hits.set(key, active);
+
+    const oldestTimestamp = active[0];
+    const resetInMs = oldestTimestamp
+      ? Math.max(0, config.windowMs - (now - oldestTimestamp))
+      : 0;
+
+    return {
+      hitCount: active.length,
+      limit: config.limit,
+      oldestTimestamp,
+      remaining: Math.max(0, config.limit - active.length),
+      resetInMs
+    };
+  };
 
   return {
     allow(key, config) {
       const now = Date.now();
-      const current = hits.get(key) ?? [];
-      const next = current.filter((timestamp) => now - timestamp < config.windowMs);
-      if (next.length >= config.limit) {
-        hits.set(key, next);
+      const state = snapshot(key, config, now);
+      if (state.hitCount >= config.limit) {
         return false;
       }
+      const next = hits.get(key) ?? [];
       next.push(now);
       hits.set(key, next);
       return true;
+    },
+    inspect(key, config) {
+      return snapshot(key, config, Date.now());
     }
   };
 }
